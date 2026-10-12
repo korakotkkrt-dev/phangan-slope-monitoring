@@ -605,6 +605,49 @@ button.chat-dl-btn:disabled{opacity:.55;cursor:default}
   .legend{gap:6px 10px}
   .legend label{font-size:11px;min-height:24px}
 }
+
+.digest{margin-bottom:12px}
+.dg-head{display:flex;flex-wrap:wrap;gap:4px 12px;align-items:baseline;margin-bottom:6px}
+.dg-head b{font-size:15px}
+.dg-head span{font:11px "IBM Plex Mono",monospace;color:var(--ink-3)}
+.dg-summary{margin:4px 0 10px;padding-left:18px;font-size:13px;line-height:1.5}
+.dg-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px 16px}
+.dg-grid section{min-width:0}
+.dg-grid .dg-wide{grid-column:1 / -1}
+.dg-grid h4{margin:0 0 4px;font:11px "IBM Plex Mono",monospace;letter-spacing:.08em;text-transform:uppercase;color:var(--ink-3);font-weight:500}
+.dg-big{font-size:24px;font-weight:600}
+.dg-sub{font:11px "IBM Plex Mono",monospace;color:var(--ink-3)}
+.dg-warn{color:var(--warn);font-size:12.5px;margin-bottom:3px}
+.dg-ok{color:var(--ok);font-size:12.5px}
+.dg-scroll{overflow-x:auto}
+.dg-table{border-collapse:collapse;width:100%;font-size:12.5px}
+.dg-table th{font:10.5px "IBM Plex Mono",monospace;color:var(--ink-3);text-align:right;font-weight:500;padding:2px 8px;border-bottom:1px solid var(--line-soft)}
+.dg-table td{padding:3px 8px;text-align:right;white-space:nowrap;border-bottom:1px solid var(--line-soft)}
+.dg-table th:first-child,.dg-table td:first-child{text-align:left}
+.dg-table tr.dg-row{cursor:pointer}
+.dg-table tr.dg-row:hover{background:var(--line-soft)}
+.dg-d{font-weight:600}
+.dg-spark{color:var(--accent);vertical-align:middle}
+.dg-chips{display:flex;gap:4px;margin-top:2px}
+.dg-chips .pill{font-size:10px;padding:1px 7px}
+.dg-grid section div{font-size:12.5px}
+.dg-grid section .dg-big{font-size:24px}
+.dg-grid section .dg-sub{font-size:11px}
+.sync-btn[data-state=synced]::after{content:' ✓';color:var(--ok)}
+.sync-btn[data-state=dirty]::after,.sync-btn[data-state=readonly]::after{content:' ●';color:var(--warn)}
+.sync-btn[data-state=conflict]::after,.sync-btn[data-state=error]::after{content:' !';color:var(--crit);font-weight:700}
+.sync-status{font-weight:600;margin-bottom:4px}
+.sync-status[data-state=synced]{color:var(--ok)}
+.sync-status[data-state=dirty],.sync-status[data-state=readonly]{color:var(--warn)}
+.sync-status[data-state=conflict],.sync-status[data-state=error]{color:var(--crit)}
+@media (max-width:700px){
+  .dg-grid{grid-template-columns:minmax(0,1fr)}
+  .dg-hide-m{display:none}
+  .dg-grid section .dg-big{font-size:21px}
+  .dg-spark{width:62px}
+  .dg-table td:first-child .dg-sub{display:block}
+  .dg-summary{font-size:12.5px}
+}
 </style>
 
 <div class="wrap">
@@ -1566,6 +1609,184 @@ summaryEl.addEventListener('click', e => {
   if (!btn) return;
   openChannelDetail(btn.dataset.st, btn.dataset.kind, btn.dataset.ch);
 });
+// ---- "Last 24 hours" digest at the top of each station's Overview -----------------------------------
+// Everything here is read straight from the station's own arrays (same fault exclusion as the tiles); the only
+// judgement it makes is "unusual": today's 24 h change is more than 3x this channel's typical 24 h change over the
+// previous 30 days (and above a small absolute step), so a channel that always wanders is not flagged every day.
+const DG_DAY = 86400;
+const DG_ICT = 7 * 3600;
+function dgMedian(v){ if (!v.length) return NaN; const s = v.slice().sort((a, b) => a - b); return s[s.length >> 1]; }
+function dgWin(st, arr, fault, t0, t1){
+  const xs = st.xs;
+  const i0 = lowerBound(xs, t0, 0, xs.length), i1 = lowerBound(xs, t1 + 1, 0, xs.length);
+  const useFault = thresholds.faultFilterEnabled && fault;
+  const v = [];
+  for (let i = i0; i < i1; i++){ const x = arr[i]; if (x !== x) continue; if (useFault && fault[i]) continue; v.push(x); }
+  return v.length >= 3 ? dgMedian(v) : NaN;
+}
+function dgChannel(st, nm, minStep){
+  const arr = st.CH[nm], fault = st.FAULT && st.FAULT[nm];
+  const T = st.xs[st.n - 1];
+  const now = dgWin(st, arr, fault, T - 1800, T);
+  const d24 = now - dgWin(st, arr, fault, T - DG_DAY - 900, T - DG_DAY + 900);
+  const d7 = now - dgWin(st, arr, fault, T - 7 * DG_DAY - 900, T - 7 * DG_DAY + 900);
+  const past = [];
+  for (let k = 1; k <= 30; k++){
+    const a = dgWin(st, arr, fault, T - k * DG_DAY - 900, T - k * DG_DAY + 900);
+    const b = dgWin(st, arr, fault, T - (k + 1) * DG_DAY - 900, T - (k + 1) * DG_DAY + 900);
+    if (a === a && b === b) past.push(Math.abs(a - b));
+  }
+  const typical = past.length >= 8 ? dgMedian(past) : NaN;
+  const unusual = isFinite(d24) && isFinite(typical) && Math.abs(d24) > minStep && Math.abs(d24) > 3 * Math.max(typical, minStep / 2);
+  const spark = [];
+  for (let h = 72; h >= 1; h--) spark.push(dgWin(st, arr, fault, T - h * 3600, T - (h - 1) * 3600));
+  return { nm, now, d24, d7, typical, unusual, spark };
+}
+function dgSpark(vals){
+  const f = vals.filter(v => v === v);
+  if (f.length < 4) return '';
+  let lo = Infinity, hi = -Infinity;
+  f.forEach(v => { if (v < lo) lo = v; if (v > hi) hi = v; });
+  const rng = hi - lo || 1, W = 84, H = 22;
+  let d = '', pen = false;
+  vals.forEach((v, i) => {
+    if (v !== v){ pen = false; return; }
+    d += (pen ? 'L' : 'M') + (i * W / (vals.length - 1)).toFixed(1) + ' ' + (H - 2 - (v - lo) / rng * (H - 4)).toFixed(1);
+    pen = true;
+  });
+  return '<svg class="dg-spark" viewBox="0 0 ' + W + ' ' + H + '" width="' + W + '" height="' + H + '" aria-hidden="true"><path d="' + d + '" fill="none" stroke="currentColor" stroke-width="1.4"/></svg>';
+}
+function dgRainWindow(st, t0, t1){
+  const rate = st.CH['rainfall_rate']; if (!rate) return NaN;
+  const xs = st.xs;
+  let sum = 0, any = false;
+  for (let i = Math.max(1, lowerBound(xs, t0, 0, xs.length)); i < xs.length && xs[i] <= t1; i++){
+    const dtH = (xs[i] - xs[i - 1]) / 3600, r = rate[i];
+    if (r !== r || dtH <= 0 || dtH >= 1) continue;
+    sum += r * dtH; any = true;
+  }
+  return any ? sum : NaN;
+}
+function dgRainPeak(st, T){
+  const rate = st.CH['rainfall_rate']; if (!rate) return null;
+  const xs = st.xs, b = new Map();
+  for (let i = Math.max(1, lowerBound(xs, T - DG_DAY, 0, xs.length)); i < xs.length; i++){
+    const dtH = (xs[i] - xs[i - 1]) / 3600, r = rate[i];
+    if (r !== r || dtH <= 0 || dtH >= 1) continue;
+    const k = Math.floor((xs[i] + DG_ICT) / 3600);
+    b.set(k, (b.get(k) || 0) + r * dtH);
+  }
+  let best = null;
+  b.forEach((v, k) => { if (!best || v > best.mm) best = { mm: v, t: k * 3600 - DG_ICT }; });
+  return best;
+}
+function dgTime(t){
+  return new Date(t * 1e3).toLocaleString('en-GB', { timeZone: 'Asia/Bangkok', day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' });
+}
+function dgSign(v, d){ return v !== v ? '–' : (v >= 0 ? '+' : '−') + Math.abs(v).toFixed(d); }
+function dgHealth(st, T){
+  const names = [];
+  ['tilt', 'soilm', 'soilt', 'wx'].forEach(g => group(st, g).forEach(nm => { if (!/_rate$/.test(nm) && !/^alarm/.test(nm) && !names.includes(nm)) names.push(nm); }));
+  if (st.CH['rainfall_rate']) names.push('rainfall_rate');
+  const stale = [], faults = [], gaps = [];
+  const i0 = lowerBound(st.xs, T - DG_DAY, 0, st.xs.length), i1 = st.xs.length;
+  names.forEach(nm => {
+    const arr = st.CH[nm];
+    const idx = lastValidIndex(arr);
+    if (idx < 0 || T - st.xs[idx] > 3 * 3600){ stale.push({ nm, last: idx < 0 ? null : st.xs[idx] }); return; }
+    const fault = st.FAULT && st.FAULT[nm];
+    let f = 0, miss = 0;
+    for (let i = i0; i < i1; i++){ if (arr[i] !== arr[i]) miss++; else if (fault && fault[i]) f++; }
+    if (f > 0) faults.push({ nm, mins: f });
+    if (miss >= 30) gaps.push({ nm, mins: miss });
+  });
+  const alarm = {};
+  ['alarm', 'alarm1', 'alarm2'].forEach(a => {
+    const arr = st.CH[a]; if (!arr) return;
+    let c = 0; for (let i = i0; i < i1; i++) if (arr[i] > 0) c++;
+    if (c) alarm[a] = c;
+  });
+  return { stale, faults, gaps, alarm };
+}
+function digestHTML(st){
+  const T = st.xs[st.n - 1];
+  const esc = escapeHtml;
+  const { rockNames } = classifyTilt(st);
+  const bullets = [];
+
+  // rain
+  const rain24 = dgRainWindow(st, T - DG_DAY, T), rainPrev = dgRainWindow(st, T - 2 * DG_DAY, T - DG_DAY), rain72 = dgRainWindow(st, T - 3 * DG_DAY, T);
+  const peak = dgRainPeak(st, T);
+  let rainHtml = '<div class="dg-big">' + (rain24 === rain24 ? rain24.toFixed(1) + ' mm' : '–') + '</div><div class="dg-sub">last 24 h · previous 24 h ' + (rainPrev === rainPrev ? rainPrev.toFixed(1) + ' mm' : '–') + '</div>' +
+    '<div class="dg-sub">3 days ' + (rain72 === rain72 ? rain72.toFixed(1) + ' mm' : '–') + (peak && peak.mm >= 0.5 ? ' · peak ' + peak.mm.toFixed(1) + ' mm in 1 h (' + dgTime(peak.t) + ')' : '') + '</div>';
+  bullets.push('Rain ' + (rain24 === rain24 ? rain24.toFixed(1) + ' mm' : 'n/a') + ' in the last 24 h (previous 24 h ' + (rainPrev === rainPrev ? rainPrev.toFixed(1) : 'n/a') + ' mm), 3-day ' + (rain72 === rain72 ? rain72.toFixed(1) : 'n/a') + ' mm.');
+
+  // tilt movers
+  const tilt = group(st, 'tilt').map(nm => dgChannel(st, nm, 0.1)).filter(r => r.d24 === r.d24);
+  tilt.sort((a, b) => Math.abs(b.d24) - Math.abs(a.d24));
+  const unusualTilt = tilt.filter(r => r.unusual);
+  const row = (r, kind, unit, dec) => {
+    const risk = kind === 'tilt' ? tiltRisk(st, r.nm, r.now) : moistureRisk(st, r.nm, r.now);
+    const chip = r.unusual ? '<span class="pill warn" title="24 h change is more than 3x the typical daily change of the last 30 days">unusual</span>' : '';
+    const rk = (criteriaEnabled && risk !== 'ok') ? '<span class="pill ' + risk + '">' + RISK_LABEL[risk] + '</span>' : '';
+    const sub = kind === 'tilt' ? (rockNames.includes(r.nm) ? 'rock' : 'soil') : soilDepthLabel(st, r.nm);
+    return '<tr class="dg-row" data-st="' + st.id + '" data-kind="' + (kind === 'tilt' ? 'tilt' : 'moist') + '" data-ch="' + r.nm + '">' +
+      '<td><b>' + esc(r.nm) + '</b> <span class="dg-sub">' + esc(sub) + '</span>' + ((chip || rk) ? '<div class="dg-chips">' + chip + rk + '</div>' : '') + '</td>' +
+      '<td>' + r.now.toFixed(dec) + unit + '</td><td class="dg-d">' + dgSign(r.d24, dec) + '</td><td class="dg-d dg-hide-m">' + dgSign(r.d7, dec) + '</td>' +
+      '<td>' + dgSpark(r.spark) + '</td></tr>';
+  };
+  const head = '<thead><tr><th>channel</th><th>now</th><th>Δ 24 h</th><th class="dg-hide-m">Δ 7 d</th><th>last 72 h</th></tr></thead>';
+  const tiltRows = tilt.slice(0, 5).map(r => row(r, 'tilt', '°', 2)).join('');
+  if (tilt.length){
+    const big = tilt[0];
+    bullets.push(unusualTilt.length
+      ? 'Unusual tilt movement vs the last 30 days: ' + unusualTilt.slice(0, 3).map(r => r.nm + ' ' + dgSign(r.d24, 2) + '°').join(', ') + (unusualTilt.length > 3 ? ' (+' + (unusualTilt.length - 3) + ' more)' : '') + '.'
+      : 'No unusual tilt movement vs the last 30 days; largest 24 h change ' + big.nm + ' ' + dgSign(big.d24, 2) + '°.');
+  }
+  // soil moisture movers
+  const moist = group(st, 'soilm').map(nm => dgChannel(st, nm, 0.5)).filter(r => r.d24 === r.d24);
+  moist.sort((a, b) => Math.abs(b.d24) - Math.abs(a.d24));
+  const moistRows = moist.slice(0, 4).map(r => row(r, 'moist', '%', 1)).join('');
+  if (moist.length){
+    const um = moist.filter(r => r.unusual);
+    bullets.push(um.length ? 'Unusual soil-moisture change: ' + um.slice(0, 3).map(r => r.nm + ' ' + dgSign(r.d24, 1) + '%').join(', ') + '.'
+      : 'Soil moisture: largest 24 h change ' + moist[0].nm + ' ' + dgSign(moist[0].d24, 1) + '%.');
+  }
+  // sensor health
+  const h = dgHealth(st, T);
+  const ageH = (Date.now() / 1e3 - T) / 3600;
+  let healthHtml = '';
+  if (ageH > 6) healthHtml += '<div class="dg-warn">⚠ newest data is ' + fmtAgo(T) + ' — the logger or the daily refresh has not delivered anything newer.</div>';
+  if (h.stale.length) healthHtml += '<div class="dg-warn">no reading for more than 3 h: ' + h.stale.map(s => esc(s.nm) + (s.last ? ' (last ' + dgTime(s.last) + ')' : ' (never)')).join(', ') + '</div>';
+  if (h.faults.length) healthHtml += '<div>sensor-fault samples in the last 24 h: ' + h.faults.map(f => esc(f.nm) + ' ' + f.mins + ' min').join(', ') + '</div>';
+  if (h.gaps.length) healthHtml += '<div>gaps (≥ 30 min without a sample): ' + h.gaps.map(f => esc(f.nm) + ' ' + f.mins + ' min').join(', ') + '</div>';
+  Object.keys(h.alarm).forEach(a => { healthHtml += '<div>' + a + ' flagged for ' + h.alarm[a] + ' min</div>'; });
+  if (!healthHtml) healthHtml = '<div class="dg-ok">all channels reporting, no fault flags or gaps in the last 24 h</div>';
+  bullets.push(h.stale.length ? h.stale.length + ' channel' + (h.stale.length > 1 ? 's' : '') + ' without a reading for 3 h+: ' + h.stale.slice(0, 4).map(s => s.nm).join(', ') + '.'
+    : (h.faults.length || h.gaps.length) ? 'Sensor health: ' + (h.faults.length ? h.faults.length + ' channel(s) with fault flags' : '') + (h.faults.length && h.gaps.length ? ', ' : '') + (h.gaps.length ? h.gaps.length + ' with gaps' : '') + ' in the last 24 h.'
+    : 'All sensors reporting.');
+  // notes
+  const notes = (typeof getNotes === 'function' ? getNotes() : []).filter(n => (n.st === st.id || n.st === 'all') && n.t >= T - DG_DAY - 3600 && n.t <= T + 3600);
+  let notesHtml = notes.length ? notes.sort((a, b) => b.t - a.t).map(n => '<div><b>' + dgTime(n.t) + '</b> · ' + esc(n.cat || '') + ' — ' + esc(n.text) + '</div>').join('')
+    : '<div class="dg-sub">no field notes in this window (add them with the <b>notes</b> button)</div>';
+  if (notes.length) bullets.push(notes.length + ' field note' + (notes.length > 1 ? 's' : '') + ' in the window: ' + notes.slice(0, 2).map(n => n.text).join('; ') + '.');
+
+  return '<div class="scard digest">' +
+    '<div class="dg-head"><b>Last 24 hours</b><span>' + dgTime(T - DG_DAY) + ' → ' + dgTime(T) + ' ICT · newest data ' + fmtAgo(T) + '</span></div>' +
+    '<ul class="dg-summary">' + bullets.map(b => '<li>' + esc(b) + '</li>').join('') + '</ul>' +
+    '<div class="dg-grid">' +
+      '<section><h4>Rain</h4>' + rainHtml + '</section>' +
+      '<section><h4>Sensor health</h4>' + healthHtml + '</section>' +
+      '<section class="dg-wide"><h4>Tilt — biggest 24 h changes</h4>' + (tiltRows ? '<div class="dg-scroll"><table class="dg-table">' + head + '<tbody>' + tiltRows + '</tbody></table></div>' : '<div class="dg-sub">no tilt data</div>') + '</section>' +
+      (moistRows ? '<section class="dg-wide"><h4>Soil moisture — biggest 24 h changes</h4><div class="dg-scroll"><table class="dg-table">' + head + '<tbody>' + moistRows + '</tbody></table></div></section>' : '') +
+      '<section class="dg-wide"><h4>Field notes</h4>' + notesHtml + '</section>' +
+    '</div></div>';
+}
+summaryEl.addEventListener('click', e => {
+  const r = e.target.closest('.dg-row');
+  if (r) openChannelDetail(r.dataset.st, r.dataset.kind, r.dataset.ch);
+});
+
 function renderOverviewTiles(){
   summaryEl.innerHTML = '';
   STATIONS.forEach(st => {
@@ -1661,6 +1882,7 @@ function renderOverviewTiles(){
     wrap.dataset.section = st.id;
     wrap.style.setProperty('--stripe', st.stripe);
     wrap.innerHTML =
+      digestHTML(st) +
       '<div class="scard">' +
         '<div class="sname"><b>' + st.label + '</b>' +
           (criteriaEnabled ? '<span class="pill ' + stationRisk + '">● ' + RISK_LABEL[stationRisk] + '</span>' : '<span class="pill none">criteria off</span>') + '</div>' +
@@ -1680,6 +1902,346 @@ function renderOverviewTiles(){
   });
 }
 THRESHOLD_CONSUMERS.push(renderOverviewTiles);
+
+// ---- shared settings ("sync") + field notes -----------------------------------------------------------
+// Splices, value filters, pinned lines, thresholds, sensor marks and field notes live in this browser's localStorage.
+// On the GitHub Pages copy they can also be saved to config/settings.json in the repository (needs a fine-grained
+// token that can write to THIS repository only, kept in this browser) and every other device loads them from there.
+// Nothing is merged silently: a device with unsaved changes never overwrites newer shared settings or the other way round.
+const SYNC_CFG = { owner: 'korakotkkrt-dev', repo: 'phangan-slope-monitoring', path: 'config/settings.json', branch: 'main' };
+const SYNC_KEYS = {
+  thresholds: 'psw_thresholds_v1', drawlines: 'psw_drawlines_v1', shift: 'psw_shift_v1', filter: 'psw_filter_v1',
+  range: 'psw_range_v1', topview: 'psw_topview_v2', notes: 'psw_notes_v1',
+};
+const SYNC_TOKEN_KEY = 'psw_gh_token', SYNC_REV_KEY = 'psw_sync_rev', SYNC_SNAP_KEY = 'psw_sync_snap', SYNC_AUTO_KEY = 'psw_sync_auto', SYNC_GUARD_KEY = 'psw_sync_reloaded';
+const SYNC_ENABLED = /github\.io$/.test(location.hostname) || /[?&]sync=1/.test(location.search);
+const syncState = { sha: null, status: 'idle', msg: '', remote: null, busy: false };
+const SYNC_KEY_SET = new Set(Object.values(SYNC_KEYS));
+
+function lsGet(k){ try { return localStorage.getItem(k); } catch (e){ return null; } }
+function lsSet(k, v){ try { localStorage.setItem(k, v); } catch (e){ /* private mode */ } }
+function lsDel(k){ try { localStorage.removeItem(k); } catch (e){ /* ignore */ } }
+function canon(v){
+  if (v === null || typeof v !== 'object') return JSON.stringify(v);
+  if (Array.isArray(v)) return '[' + v.map(canon).join(',') + ']';
+  return '{' + Object.keys(v).sort().map(k => JSON.stringify(k) + ':' + canon(v[k])).join(',') + '}';
+}
+function isEmptyVal(v){ return v == null || (Array.isArray(v) && !v.length) || (typeof v === 'object' && !Array.isArray(v) && !Object.keys(v).length); }
+function localSettings(){
+  const o = {};
+  Object.keys(SYNC_KEYS).forEach(k => {
+    const raw = lsGet(SYNC_KEYS[k]);
+    if (raw == null) return;
+    try { const v = JSON.parse(raw); if (!isEmptyVal(v)) o[k] = v; } catch (e){ /* skip unreadable */ }
+  });
+  return o;
+}
+function syncToken(){ return lsGet(SYNC_TOKEN_KEY) || ''; }
+function syncIsDirty(){ return canon(localSettings()) !== (lsGet(SYNC_SNAP_KEY) == null ? canon({}) : lsGet(SYNC_SNAP_KEY)); }
+function syncLocalRev(){ return Number(lsGet(SYNC_REV_KEY) || 0); }
+function syncDevice(){ return (window.matchMedia && matchMedia('(max-width: 700px)').matches) ? 'phone' : 'computer'; }
+
+function b64utf8(str){ const bytes = new TextEncoder().encode(str); let s = ''; bytes.forEach(b => { s += String.fromCharCode(b); }); return btoa(s); }
+function unb64utf8(b64){ const bin = atob(b64.replace(/\s/g, '')); const bytes = Uint8Array.from(bin, c => c.charCodeAt(0)); return new TextDecoder().decode(bytes); }
+async function ghFetch(path, opts){
+  const o = Object.assign({ headers: {}, cache: 'no-store' }, opts || {});
+  o.headers = Object.assign({ Accept: 'application/vnd.github+json' }, o.headers);
+  const tok = syncToken();
+  if (tok) o.headers.Authorization = 'Bearer ' + tok;
+  return fetch('https://api.github.com' + path, o);
+}
+async function ghGetSettings(){
+  const res = await ghFetch('/repos/' + SYNC_CFG.owner + '/' + SYNC_CFG.repo + '/contents/' + SYNC_CFG.path + '?ref=' + SYNC_CFG.branch);
+  if (res.status === 404) return { missing: true, sha: null, data: { rev: 0 } };
+  if (!res.ok) throw new Error('GitHub answered ' + res.status);
+  const j = await res.json();
+  return { sha: j.sha, data: JSON.parse(unb64utf8(j.content)) };
+}
+async function ghPutSettings(data, sha){
+  const body = { message: 'settings: update from ' + syncDevice() + ' (rev ' + data.rev + ')', content: b64utf8(JSON.stringify(data, null, 1)), branch: SYNC_CFG.branch };
+  if (sha) body.sha = sha;
+  return ghFetch('/repos/' + SYNC_CFG.owner + '/' + SYNC_CFG.repo + '/contents/' + SYNC_CFG.path, { method: 'PUT', body: JSON.stringify(body), headers: { 'Content-Type': 'application/json' } });
+}
+function applyRemoteToLocal(data){
+  Object.keys(SYNC_KEYS).forEach(k => {
+    if (!isEmptyVal(data[k])) lsSet(SYNC_KEYS[k], JSON.stringify(data[k])); else lsDel(SYNC_KEYS[k]);
+  });
+  const stores = {}; Object.keys(SYNC_KEYS).forEach(k => { if (!isEmptyVal(data[k])) stores[k] = data[k]; });
+  lsSet(SYNC_SNAP_KEY, canon(stores));
+  lsSet(SYNC_REV_KEY, String(data.rev || 0));
+}
+function syncSetStatus(status, msg){
+  syncState.status = status; syncState.msg = msg || '';
+  if (window.__syncBtn){
+    window.__syncBtn.dataset.state = status;
+    window.__syncBtn.title = 'shared settings: ' + (msg || status);
+  }
+  if (window.__syncRender) window.__syncRender();
+}
+async function syncPull(opts){
+  opts = opts || {};
+  const r = await ghGetSettings();
+  syncState.sha = r.sha; syncState.remote = r.data;
+  const remoteRev = r.data.rev || 0, localRev = syncLocalRev();
+  if (remoteRev > localRev || opts.force){
+    if (!syncIsDirty() || opts.force){
+      applyRemoteToLocal(r.data);
+      return 'reload';
+    }
+    syncSetStatus('conflict', 'newer shared settings exist (rev ' + remoteRev + ') but this device has unsaved changes');
+    return 'conflict';
+  }
+  syncSetStatus(syncIsDirty() ? 'dirty' : 'synced', syncIsDirty() ? 'unsaved changes on this device' : 'up to date (rev ' + localRev + ')');
+  return 'ok';
+}
+async function syncPush(opts){
+  opts = opts || {};
+  if (!syncToken()){ syncSetStatus('readonly', 'no token on this device — changes stay here'); return 'notoken'; }
+  if (syncState.busy) return 'busy';
+  syncState.busy = true;
+  try {
+    const r = await ghGetSettings();
+    const remoteRev = r.data.rev || 0;
+    if (remoteRev > syncLocalRev() && !opts.force){
+      syncState.sha = r.sha; syncState.remote = r.data;
+      syncSetStatus('conflict', 'shared settings changed elsewhere (rev ' + remoteRev + ') — choose which to keep');
+      return 'conflict';
+    }
+    const local = localSettings();
+    const data = Object.assign({ version: 1, rev: Math.max(remoteRev, syncLocalRev()) + 1, updated: new Date().toISOString(), by: syncDevice() }, local);
+    const res = await ghPutSettings(data, r.sha);
+    if (res.status === 401 || res.status === 403 || res.status === 404){ syncSetStatus('error', 'token rejected or has no write access to the repository (' + res.status + ')'); return 'denied'; }
+    if (res.status === 409 || res.status === 422){ syncSetStatus('conflict', 'shared settings changed while saving — try again'); return 'conflict'; }
+    if (!res.ok){ syncSetStatus('error', 'GitHub answered ' + res.status); return 'error'; }
+    const j = await res.json();
+    syncState.sha = j.content && j.content.sha;
+    lsSet(SYNC_REV_KEY, String(data.rev));
+    lsSet(SYNC_SNAP_KEY, canon(local));
+    syncSetStatus('synced', 'saved to GitHub (rev ' + data.rev + ')');
+    return 'ok';
+  } catch (e){
+    syncSetStatus('error', 'could not reach GitHub: ' + e.message);
+    return 'error';
+  } finally { syncState.busy = false; }
+}
+let syncAutoTimer = null;
+function syncScheduleAuto(){
+  if (!SYNC_ENABLED) return;
+  clearTimeout(syncAutoTimer);
+  syncAutoTimer = setTimeout(() => {
+    if (!syncIsDirty()){ syncSetStatus('synced', 'up to date (rev ' + syncLocalRev() + ')'); return; }
+    if (lsGet(SYNC_AUTO_KEY) !== '0' && syncToken() && syncState.status !== 'conflict') syncPush();
+    else syncSetStatus(syncToken() ? 'dirty' : 'readonly', syncToken() ? 'unsaved changes on this device' : 'no token on this device — changes stay here');
+  }, 4000);
+}
+if (SYNC_ENABLED){
+  const _setItem = Storage.prototype.setItem;
+  Storage.prototype.setItem = function(k, v){
+    _setItem.call(this, k, v);
+    if (this === window.localStorage && SYNC_KEY_SET.has(k)) syncScheduleAuto();
+  };
+}
+async function syncBoot(){
+  if (!SYNC_ENABLED) return;
+  try {
+    const res = await syncPull();
+    if (res === 'reload'){
+      const g = sessionStorage.getItem(SYNC_GUARD_KEY);
+      const rev = String(syncLocalRev());
+      if (g !== rev){ sessionStorage.setItem(SYNC_GUARD_KEY, rev); location.reload(); }
+    }
+  } catch (e){
+    syncSetStatus('error', 'shared settings unavailable (' + e.message + ') — using what is stored on this device');
+  }
+}
+
+// ---- field notes (shared through the same settings file) ----
+function getNotes(){
+  try { const v = JSON.parse(lsGet(SYNC_KEYS.notes) || '[]'); return Array.isArray(v) ? v : []; } catch (e){ return []; }
+}
+function saveNotes(list){ lsSet(SYNC_KEYS.notes, JSON.stringify(list)); }
+function drawNotesHook(spec){
+  return u => {
+    const list = getNotes().filter(n => n.st === 'all' || n.st === spec.section);
+    if (!list.length) return;
+    const { left, top, width, height } = u.bbox;
+    if (width <= 0 || height <= 0) return;
+    const { ctx } = u; const dpr = devicePixelRatio || 1;
+    ctx.save();
+    ctx.beginPath(); ctx.rect(left, top, width, height); ctx.clip();
+    ctx.font = (10 * dpr) + 'px "IBM Plex Mono", monospace';
+    ctx.textBaseline = 'top';
+    ctx.lineWidth = 1.2 * dpr;
+    let slot = 0;
+    list.sort((a, b) => a.t - b.t).forEach(n => {
+      const x = u.valToPos(n.t, 'x', true);
+      if (x == null || !isFinite(x) || x < left || x > left + width) return;
+      ctx.strokeStyle = COLOR_INK3; ctx.fillStyle = COLOR_INK3;
+      ctx.setLineDash([2 * dpr, 3 * dpr]);
+      ctx.beginPath(); ctx.moveTo(x, top); ctx.lineTo(x, top + height); ctx.stroke();
+      ctx.setLineDash([]);
+      const label = (n.cat ? n.cat + ': ' : '') + n.text;
+      const txt = label.length > 28 ? label.slice(0, 27) + '…' : label;
+      const y = top + 3 * dpr + (slot++ % 3) * 13 * dpr;
+      const w = ctx.measureText(txt).width + 8 * dpr;
+      const tx = (x + w < left + width) ? x + 2 * dpr : x - w;
+      ctx.globalAlpha = 0.85; ctx.fillStyle = COLOR_PANEL; ctx.fillRect(tx, y - 1 * dpr, w, 12 * dpr);
+      ctx.globalAlpha = 1; ctx.fillStyle = COLOR_INK; ctx.fillText(txt, tx + 4 * dpr, y);
+    });
+    ctx.restore();
+  };
+}
+
+// ---- buttons + popovers ----
+const syncPopover = document.createElement('div');
+syncPopover.className = 'cf-popover';
+document.body.appendChild(syncPopover);
+const notesPopover = document.createElement('div');
+notesPopover.className = 'cf-popover';
+document.body.appendChild(notesPopover);
+document.addEventListener('mousedown', e => {
+  [syncPopover, notesPopover].forEach(p => { if (p.classList.contains('show') && !p.contains(e.target) && !e.target.closest('.sync-btn')) p.classList.remove('show'); });
+});
+function addSyncAndNotesButtons(group){
+  const notesBtn = document.createElement('button');
+  notesBtn.textContent = 'notes'; notesBtn.className = 'sync-btn';
+  notesBtn.title = 'field notes: sensor swaps, maintenance, rain events — shown as dotted lines on the charts';
+  notesBtn.onclick = () => { syncPopover.classList.remove('show'); renderNotesPopover(); positionPopoverNear(notesPopover, notesBtn); };
+  group.appendChild(notesBtn);
+  const btn = document.createElement('button');
+  btn.textContent = 'sync'; btn.className = 'sync-btn'; btn.dataset.state = 'idle';
+  btn.title = 'shared settings';
+  btn.onclick = () => { notesPopover.classList.remove('show'); renderSyncPopover(); positionPopoverNear(syncPopover, btn); };
+  group.appendChild(btn);
+  window.__syncBtn = btn;
+  window.__syncRender = () => { if (syncPopover.classList.contains('show')) renderSyncPopover(); };
+  if (SYNC_ENABLED) syncBoot(); else { btn.dataset.state = 'off'; btn.title = 'shared settings are available on the GitHub Pages version of this page'; }
+  window.addEventListener('beforeunload', () => {});
+}
+function mkEl(tag, cls, txt){ const e = document.createElement(tag); if (cls) e.className = cls; if (txt != null) e.textContent = txt; return e; }
+function renderSyncPopover(){
+  const p = syncPopover; p.innerHTML = '';
+  p.style.width = '340px'; p.style.maxHeight = 'calc(100vh - 20px)'; p.style.overflowY = 'auto';
+  p.appendChild(mkEl('div', 'cf-title', 'Shared settings'));
+  if (!SYNC_ENABLED){
+    const n = mkEl('div', 'note', 'Sharing settings between phone and computer works on the GitHub Pages version of this page. Here, everything you set (splices, filters, pinned lines, notes) stays in this browser.');
+    n.style.fontSize = '11px'; p.appendChild(n);
+    p.appendChild(Object.assign(mkEl('div', 'cf-btns'), {})).appendChild(Object.assign(mkEl('button', null, 'close'), { onclick: () => p.classList.remove('show') }));
+    return;
+  }
+  const st = syncState.status;
+  const label = { synced: 'Up to date', dirty: 'Unsaved changes on this device', conflict: 'Conflict — choose which version to keep', readonly: 'Read-only on this device (no token)', error: 'Problem', idle: 'Checking…' }[st] || st;
+  const stEl = mkEl('div', 'sync-status', label); stEl.dataset.state = st; p.appendChild(stEl);
+  if (syncState.msg) { const m = mkEl('div', 'note', syncState.msg); m.style.fontSize = '10.5px'; p.appendChild(m); }
+  const what = mkEl('div', 'note', 'Shared: splices, value filters, pinned lines, thresholds, sensor marks and field notes. Not shared: the zoom window and panel layout.');
+  what.style.cssText = 'font-size:10.5px;margin:6px 0'; p.appendChild(what);
+  const row = mkEl('div', 'cf-btns');
+  const saveBtn = mkEl('button', 'cf-apply', 'save to GitHub'); saveBtn.disabled = !syncToken();
+  saveBtn.onclick = async () => { saveBtn.disabled = true; await syncPush(); renderSyncPopover(); };
+  const loadBtn = mkEl('button', null, 'load shared');
+  loadBtn.title = 'replace what is on this device with the shared settings';
+  loadBtn.onclick = async () => {
+    try {
+      const r = await ghGetSettings();
+      applyRemoteToLocal(r.data);
+      sessionStorage.setItem(SYNC_GUARD_KEY, String(syncLocalRev()));
+      location.reload();
+    } catch (e){ syncSetStatus('error', 'could not load: ' + e.message); }
+  };
+  row.append(saveBtn, loadBtn);
+  p.appendChild(row);
+  if (st === 'conflict'){
+    const cf = mkEl('div', 'cf-btns'); cf.style.marginTop = '6px';
+    const mine = mkEl('button', 'cf-clear', 'keep mine (overwrite shared)'); mine.onclick = async () => { await syncPush({ force: true }); renderSyncPopover(); };
+    cf.appendChild(mine); p.appendChild(cf);
+  }
+  // token
+  p.appendChild(mkEl('div', 'cf-title', 'Token for saving'));
+  const has = !!syncToken();
+  const tRow = mkEl('div', 'cf-row');
+  const tIn = document.createElement('input'); tIn.type = 'password'; tIn.placeholder = has ? 'token saved on this device' : 'paste fine-grained token'; tIn.autocomplete = 'off';
+  tRow.appendChild(tIn); p.appendChild(tRow);
+  const tBtns = mkEl('div', 'cf-btns');
+  const tSave = mkEl('button', null, 'save token');
+  tSave.onclick = async () => {
+    const v = tIn.value.trim(); if (!v) return;
+    lsSet(SYNC_TOKEN_KEY, v);
+    const res2 = await ghFetch('/repos/' + SYNC_CFG.owner + '/' + SYNC_CFG.repo);
+    const j = res2.ok ? await res2.json() : null;
+    if (j && j.permissions && j.permissions.push) syncSetStatus(syncIsDirty() ? 'dirty' : 'synced', 'token works and can write to the repository');
+    else { syncSetStatus('error', 'token saved, but it cannot write to the repository — check its permissions'); }
+    renderSyncPopover();
+  };
+  const tDel = mkEl('button', null, 'remove token'); tDel.disabled = !has;
+  tDel.onclick = () => { lsDel(SYNC_TOKEN_KEY); syncSetStatus('readonly', 'token removed from this device'); renderSyncPopover(); };
+  tBtns.append(tSave, tDel); p.appendChild(tBtns);
+  const autoLab = mkEl('label'); autoLab.style.cssText = 'display:flex;gap:6px;align-items:center;font-size:11.5px;margin-top:8px';
+  const autoCb = document.createElement('input'); autoCb.type = 'checkbox'; autoCb.checked = lsGet(SYNC_AUTO_KEY) !== '0';
+  autoCb.onchange = () => lsSet(SYNC_AUTO_KEY, autoCb.checked ? '1' : '0');
+  autoLab.append(autoCb, document.createTextNode(' save automatically a few seconds after each change')); p.appendChild(autoLab);
+  const how = document.createElement('details'); how.style.cssText = 'font-size:10.5px;margin-top:8px';
+  how.innerHTML = '<summary>How to get a token (once per device)</summary><ol style="padding-left:16px;margin:6px 0">' +
+    '<li>GitHub → Settings → Developer settings → Fine-grained tokens → Generate new token.</li>' +
+    '<li>Repository access: <b>Only select repositories</b> → ' + SYNC_CFG.repo + '.</li>' +
+    '<li>Permissions → Repository → <b>Contents: Read and write</b> (nothing else).</li>' +
+    '<li>Copy the token, paste it above. It is stored only in this browser; anyone without it can read the shared settings but not change them.</li></ol>';
+  p.appendChild(how);
+  const close = mkEl('div', 'cf-btns'); close.style.marginTop = '8px';
+  const cb = mkEl('button', null, 'close'); cb.onclick = () => p.classList.remove('show'); close.appendChild(cb); p.appendChild(close);
+}
+function renderNotesPopover(){
+  const p = notesPopover; p.innerHTML = '';
+  p.style.width = '340px'; p.style.maxHeight = 'calc(100vh - 20px)'; p.style.overflowY = 'auto';
+  p.appendChild(mkEl('div', 'cf-title', 'Field notes'));
+  const list = getNotes().slice().sort((a, b) => b.t - a.t);
+  const box = mkEl('div', 'cf-list'); box.style.maxHeight = '170px';
+  if (!list.length) box.appendChild(mkEl('div', 'note', 'no notes yet'));
+  list.forEach(n => {
+    const r = mkEl('div'); r.style.cssText = 'display:flex;gap:6px;align-items:flex-start;font-size:11px';
+    const t = mkEl('span', null, dgTime(n.t) + ' · ' + (n.st === 'all' ? 'both' : n.st.replace('st', 'S')) + ' · ' + (n.cat ? n.cat + ' — ' : '') + n.text); t.style.flex = '1';
+    const d = mkEl('button', null, '×'); d.title = 'delete this note';
+    d.onclick = () => { saveNotes(getNotes().filter(x => x.id !== n.id)); redrawVisibleLight(); renderOverviewTiles(); renderNotesPopover(); };
+    r.append(t, d); box.appendChild(r);
+  });
+  p.appendChild(box);
+  p.appendChild(mkEl('div', 'cf-title', 'add a note'));
+  const tRow = mkEl('div', 'cf-row');
+  const tLab = mkEl('label', null, 'when (Bangkok time)');
+  const tIn = document.createElement('input'); tIn.type = 'datetime-local';
+  tIn.value = new Date(Date.now() + 7 * 3600e3).toISOString().slice(0, 16);
+  tLab.appendChild(tIn); tRow.appendChild(tLab); p.appendChild(tRow);
+  const sRow = mkEl('div', 'cf-row');
+  const sLab = mkEl('label', null, 'station');
+  const sSel = document.createElement('select'); sSel.style.cssText = 'font:12px "IBM Plex Mono",monospace;padding:4px;background:var(--panel-2);color:var(--ink);border:1px solid var(--line);border-radius:4px';
+  [['all', 'both stations']].concat(STATIONS.map(s => [s.id, s.label])).forEach(([v, l]) => { const o = mkEl('option', null, l); o.value = v; sSel.appendChild(o); });
+  sSel.value = (typeof activeStation !== 'undefined') ? activeStation : 'all';
+  sLab.appendChild(sSel);
+  const cLab = mkEl('label', null, 'type');
+  const cSel = document.createElement('select'); cSel.style.cssText = sSel.style.cssText;
+  ['sensor swap', 'sensor reinstalled', 'maintenance', 'heavy rain', 'site visit', 'other'].forEach(c => { const o = mkEl('option', null, c); o.value = c; cSel.appendChild(o); });
+  cLab.appendChild(cSel);
+  sRow.append(sLab, cLab); p.appendChild(sRow);
+  const xRow = mkEl('div', 'cf-row');
+  const xLab = mkEl('label', null, 'note');
+  const xIn = document.createElement('input'); xIn.type = 'text'; xIn.placeholder = 'e.g. replaced tilt_5 battery, re-zeroed'; xIn.maxLength = 120;
+  xLab.appendChild(xIn); xRow.appendChild(xLab); p.appendChild(xRow);
+  const err = mkEl('div', 'cf-err'); p.appendChild(err);
+  const btns = mkEl('div', 'cf-btns');
+  const add = mkEl('button', 'cf-apply', 'add note');
+  add.onclick = () => {
+    const m = /^(\d{4})-(\d\d)-(\d\d)T(\d\d):(\d\d)/.exec(tIn.value);
+    if (!m){ err.textContent = 'pick a date and time'; return; }
+    if (!xIn.value.trim()){ err.textContent = 'write a short note'; return; }
+    const t = Date.UTC(+m[1], +m[2] - 1, +m[3], +m[4], +m[5]) / 1000 - 7 * 3600;
+    const cur = getNotes();
+    cur.push({ id: Date.now().toString(36) + Math.random().toString(36).slice(2, 5), t, st: sSel.value, cat: cSel.value, text: xIn.value.trim() });
+    saveNotes(cur);
+    redrawVisibleLight(); renderOverviewTiles();
+    renderNotesPopover();
+  };
+  const close = mkEl('button', null, 'close'); close.onclick = () => p.classList.remove('show');
+  btns.append(add, close); p.appendChild(btns);
+}
 
 // ==================== chart engine ====================
 // A stretch with no samples (logger silent / no export) must not be drawn as a straight line between its two ends.
@@ -2223,6 +2785,66 @@ function resolveXRange(u, spec){
   return { xMin, xMax };
 }
 
+// ---- "draw & fit": click the start and the end of a stretch -> least-squares line on the nearest series -----
+// A drawn line is stored as { fit:true, nm, w1, w2, c, u } (series name + time window), NOT as the clicked
+// coordinates: the line is refitted from the plotted data every time the chart draws, so it follows filters,
+// splices and hidden/shown series. Older hand-drawn lines (two free points) are still drawn as before.
+const SERIES_COLORS = {};   // 'chartId|series' -> colour
+
+function seriesIdxByName(u, nm){ return u.series.findIndex((s, i) => i > 0 && s.label === nm); }
+function fitSeriesWindow(u, spec, nm, w1, w2){
+  const k = seriesIdxByName(u, nm);
+  if (k < 1) return null;
+  const xs = u.data[0], ys = u.data[k];
+  const fault = (thresholds.faultFilterEnabled && spec.primary.chOwner.FAULT) ? spec.primary.chOwner.FAULT[nm] : null;
+  const i0 = lowerBound(xs, w1, 0, xs.length), i1 = Math.min(lowerBound(xs, w2, 0, xs.length), xs.length - 1);
+  let n = 0, Sx = 0, Sy = 0, Sxx = 0, Sxy = 0, Syy = 0, xFirst = NaN, xLast = NaN, excl = 0;
+  for (let i = i0; i <= i1; i++){
+    const y = ys[i];
+    if (y == null || y !== y) continue;
+    if (fault && fault[i]){ excl++; continue; }
+    const t = (xs[i] - w1) / 3600;
+    if (n === 0) xFirst = xs[i];
+    xLast = xs[i];
+    n++; Sx += t; Sy += y; Sxx += t * t; Sxy += t * y; Syy += y * y;
+  }
+  if (n < 3) return null;
+  const dx = n * Sxx - Sx * Sx;
+  if (!(dx > 0)) return null;
+  const a = (n * Sxy - Sx * Sy) / dx, b = (Sy - a * Sx) / n;
+  const dy = n * Syy - Sy * Sy;
+  const r2 = dy > 0 ? Math.pow(n * Sxy - Sx * Sy, 2) / (dx * dy) : NaN;
+  return { nm, k, a, b, r2, n, excl, xFirst, xLast, t0: w1, w1, w2 };
+}
+function valueNearX(u, k, x){
+  const xs = u.data[0], ys = u.data[k];
+  const i = lowerBound(xs, x, 0, xs.length);
+  for (let d = 0; d <= 180; d++){
+    const a = i + d, b = i - d;
+    if (a < xs.length && ys[a] === ys[a]) return ys[a];
+    if (b >= 0 && b < xs.length && ys[b] === ys[b]) return ys[b];
+  }
+  return NaN;
+}
+// the visible primary series that passes closest (in pixels) to both clicked points
+function pickFitSeries(u, spec, p1, p2){
+  let best = null;
+  spec.primary.names.forEach((nm, idx) => {
+    const k = idx + 1, s = u.series[k];
+    if (!s || s.show === false) return;
+    const v1 = valueNearX(u, k, p1.x), v2 = valueNearX(u, k, p2.x);
+    if (v1 !== v1 || v2 !== v2) return;
+    const d = Math.abs(u.valToPos(p1.y, 'y', true) - u.valToPos(v1, 'y', true)) + Math.abs(u.valToPos(p2.y, 'y', true) - u.valToPos(v2, 'y', true));
+    if (!(d >= 0)) return;
+    if (!best || d < best.d) best = { nm, k, d };
+  });
+  return best;
+}
+function fitText(f, un){
+  const sg = v => fmtSlope(v);
+  return sg(f.a) + ' ' + un + '/h';
+}
+
 function drawUserLinesHook(spec){
   return u => {
     const lines = drawLineStore[spec.id];
@@ -2240,72 +2862,110 @@ function drawUserLinesHook(spec){
     ctx.font = (11 * dpr) + 'px "IBM Plex Mono", monospace';
     ctx.textBaseline = 'bottom';
     (lines || []).forEach(ln => {
-      const px1 = xToPx(ln.x1), py1 = u.valToPos(ln.y1, 'y', true);
-      const px2 = xToPx(ln.x2), py2 = u.valToPos(ln.y2, 'y', true);
+      let x1 = ln.x1, y1 = ln.y1, x2 = ln.x2, y2 = ln.y2, label, col = ln.c || COLOR_DRAWLINE;
+      if (ln.fit){
+        const k = seriesIdxByName(u, ln.nm);
+        if (k < 1 || u.series[k].show === false) return;
+        const f = fitSeriesWindow(u, spec, ln.nm, ln.w1, ln.w2);
+        if (!f) return;
+        x1 = f.xFirst; x2 = f.xLast; y1 = f.a * (x1 - f.t0) / 3600 + f.b; y2 = f.a * (x2 - f.t0) / 3600 + f.b;
+        // the chosen stretch, lightly shaded
+        const bx1 = xToPx(f.w1), bx2 = xToPx(f.w2);
+        ctx.save(); ctx.globalAlpha = 0.07; ctx.fillStyle = col; ctx.fillRect(Math.min(bx1, bx2), top, Math.abs(bx2 - bx1), height); ctx.restore();
+        label = ln.nm + '  ' + fmtSlope(f.a) + (ln.u || '') + '/h  R² ' + (f.r2 === f.r2 ? f.r2.toFixed(2) : 'n/a');
+      } else {
+        const { K } = lineStats(x1, y1, x2, y2);
+        label = 'K ≈ ' + (K >= 0 ? '+' : '') + K.toFixed(4) + (ln.u || '°') + '/hr';
+      }
+      const px1 = xToPx(x1), py1 = u.valToPos(y1, 'y', true);
+      const px2 = xToPx(x2), py2 = u.valToPos(y2, 'y', true);
       if ([px1, py1, px2, py2].some(v => v == null || isNaN(v) || !isFinite(v))) return;
-      const col = ln.c || COLOR_DRAWLINE;
-      ctx.lineWidth = 2 * dpr;
+      if (ln.fit){ ctx.lineWidth = 5 * dpr; ctx.strokeStyle = COLOR_PANEL; ctx.globalAlpha = 0.75; ctx.beginPath(); ctx.moveTo(px1, py1); ctx.lineTo(px2, py2); ctx.stroke(); ctx.globalAlpha = 1; }
+      ctx.lineWidth = 2.4 * dpr;
       ctx.strokeStyle = col;
+      ctx.setLineDash(ln.fit ? [] : []);
       ctx.beginPath(); ctx.moveTo(px1, py1); ctx.lineTo(px2, py2); ctx.stroke();
       [[px1, py1], [px2, py2]].forEach(([px, py]) => {
         ctx.beginPath(); ctx.arc(px, py, 3 * dpr, 0, 2 * Math.PI);
         ctx.fillStyle = col; ctx.fill();
       });
-      const { K } = lineStats(ln.x1, ln.y1, ln.x2, ln.y2);
-      const sign = K >= 0 ? '+' : '';
-      ctx.fillStyle = col;
-      ctx.fillText('K \u2248 ' + sign + K.toFixed(4) + (ln.u || '\u00b0') + '/hr', (px1 + px2) / 2 + 6 * dpr, (py1 + py2) / 2 - 6 * dpr);
+      const tw = ctx.measureText(label).width + 8 * dpr;
+      const tx = Math.min(Math.max((px1 + px2) / 2 + 6 * dpr, left + 2 * dpr), left + width - tw - 2 * dpr), ty = (py1 + py2) / 2 - 8 * dpr;
+      ctx.globalAlpha = 0.85; ctx.fillStyle = COLOR_PANEL; ctx.fillRect(tx - 3 * dpr, ty - 12 * dpr, tw, 15 * dpr);
+      ctx.globalAlpha = 1; ctx.fillStyle = col; ctx.fillText(label, tx + dpr, ty);
     });
-    // rubber-band preview from the placed first point to the live cursor —
-    // dashed and half-opacity so it's unmistakably "not committed yet",
-    // with the same live K readout so aiming for the second point has
-    // something concrete to eyeball against, not just the line's angle.
+    // aiming: the stretch between the first click and the cursor, plus which series it would fit
     if (preview){
-      const px1 = xToPx(preview.x1), py1 = u.valToPos(preview.y1, 'y', true);
-      const px2 = xToPx(preview.x2), py2 = u.valToPos(preview.y2, 'y', true);
-      if (![px1, py1, px2, py2].some(v => v == null || isNaN(v) || !isFinite(v))){
-        ctx.save();
-        ctx.globalAlpha = 0.65;
-        ctx.setLineDash([5 * dpr, 4 * dpr]);
-        ctx.lineWidth = 1.5 * dpr;
-        ctx.strokeStyle = COLOR_DRAWLINE;
-        ctx.beginPath(); ctx.moveTo(px1, py1); ctx.lineTo(px2, py2); ctx.stroke();
-        ctx.setLineDash([]);
-        ctx.beginPath(); ctx.arc(px1, py1, 3 * dpr, 0, 2 * Math.PI);
-        ctx.fillStyle = COLOR_DRAWLINE; ctx.fill();
-        const { K } = lineStats(preview.x1, preview.y1, preview.x2, preview.y2);
-        const sign = K >= 0 ? '+' : '';
-        ctx.fillText('K ≈ ' + sign + K.toFixed(4) + '°/hr (preview)', (px1 + px2) / 2 + 6 * dpr, (py1 + py2) / 2 - 6 * dpr);
-        ctx.restore();
-      }
+      const bx1 = xToPx(preview.x1), bx2 = xToPx(preview.x2);
+      ctx.save();
+      ctx.globalAlpha = 0.10; ctx.fillStyle = COLOR_DRAWLINE; ctx.fillRect(Math.min(bx1, bx2), top, Math.abs(bx2 - bx1), height);
+      ctx.globalAlpha = 0.8; ctx.strokeStyle = COLOR_DRAWLINE; ctx.lineWidth = 1.5 * dpr; ctx.setLineDash([5 * dpr, 4 * dpr]);
+      [bx1, bx2].forEach(bx => { ctx.beginPath(); ctx.moveTo(bx, top); ctx.lineTo(bx, top + height); ctx.stroke(); });
+      ctx.setLineDash([]); ctx.globalAlpha = 1; ctx.fillStyle = COLOR_DRAWLINE; ctx.textBaseline = 'top';
+      const hrs = Math.abs(preview.x2 - preview.x1) / 3600;
+      ctx.fillText((preview.nm ? 'fits ' + preview.nm : 'no series near these points') + '  ·  ' + (hrs < 48 ? hrs.toFixed(1) + ' h' : (hrs / 24).toFixed(1) + ' d'), Math.min(bx1, bx2) + 4 * dpr, top + 4 * dpr);
+      ctx.restore();
     }
     ctx.restore();
   };
 }
 
-function renderDrawLineList(chartId, listEl, onDelete){
+function renderDrawLineList(chartId, listEl, onChange){
   const lines = drawLineStore[chartId] || [];
   if (!lines.length){ listEl.innerHTML = ''; listEl.style.display = 'none'; return; }
   listEl.className = 'note measure-readout drawline-list';
   listEl.style.display = '';
+  listEl.innerHTML = '';
+  const rec = charts.find(c => c.id === chartId), spec = chartSpecs.find(s => s.id === chartId);
   const sign = v => (v >= 0 ? '+' : '');
-  listEl.innerHTML = lines.map((ln, i) => {
-    const { dtH, K } = lineStats(ln.x1, ln.y1, ln.x2, ln.y2);
-    const un = ln.u ? ln.u : 'degree';
-    return '<div class="drawline-row" data-id="' + ln.id + '"><span>' +
-      (ln.nm ? '<span style="color:' + ln.c + '">\u25a0</span> <b>' + escapeHtml(ln.nm) + ' trend</b>' : '<b>line ' + (i + 1) + '</b>') + ' — K ≈ ' +
-      sign(K) + K.toFixed(4) + ' ' + un + '/hr  (' + sign(K * 24) + (K * 24).toFixed(3) + ' ' + un + '/day)  ' +
-      '<span class="n">over ' + dtH.toFixed(2) + ' h</span></span>' +
-      '<button type="button" title="delete this line">×</button></div>';
-  }).join('');
-  listEl.querySelectorAll('.drawline-row button').forEach(btn => {
-    btn.onclick = () => {
-      const id = Number(btn.closest('.drawline-row').dataset.id);
-      drawLineStore[chartId] = (drawLineStore[chartId] || []).filter(l => l.id !== id);
+  lines.forEach((ln, i) => {
+    const row = document.createElement('div'); row.className = 'drawline-row'; row.dataset.id = ln.id;
+    const body = document.createElement('span'); body.style.cssText = 'flex:1;min-width:0';
+    if (ln.fit && rec && spec){
+      const f = fitSeriesWindow(rec.u, spec, ln.nm, ln.w1, ln.w2);
+      const un = ln.u || '';
+      const col = ln.c || COLOR_DRAWLINE;
+      if (f){
+        const hrs = (f.w2 - f.w1) / 3600;
+        const warns = [];
+        if (f.r2 === f.r2 && f.r2 < 0.3) warns.push('weak fit');
+        if (f.n < 10) warns.push('few points');
+        body.innerHTML = '<span style="color:' + col + '">■</span> <b>' + escapeHtml(ln.nm) + '</b> — slope <b>' + fmtSlope(f.a) + ' ' + un + '/h</b> (' + fmtSlope(f.a * 24) + ' ' + un + '/day) · R² ' + (f.r2 === f.r2 ? f.r2.toFixed(3) : 'n/a') + ' · n ' + f.n.toLocaleString() +
+          (warns.length ? ' <span class="tr-warn">⚠ ' + warns.join(', ') + '</span>' : '') +
+          '<br><span class="n">window ' + fmtDate(f.w1) + ' → ' + fmtDate(f.w2) + ' (' + (hrs < 48 ? hrs.toFixed(1) + ' h' : (hrs / 24).toFixed(1) + ' d') + ') · y = ' + fmtSlope(f.a) + '·t ' + (f.b >= 0 ? '+ ' : '− ') + Math.abs(f.b).toFixed(3) + ' (t in hours from window start)' + (f.excl ? ' · ' + f.excl + ' fault samples left out' : '') + '</span>';
+      } else {
+        body.innerHTML = '<span style="color:' + col + '">■</span> <b>' + escapeHtml(ln.nm) + '</b> — <span class="n">not enough data in this window (series hidden, filtered out or missing)</span>';
+      }
+      const sel = document.createElement('select');
+      sel.title = 'fit this stretch on another series';
+      sel.style.cssText = 'font:11px "IBM Plex Mono",monospace;background:var(--panel-2);color:var(--ink);border:1px solid var(--line);border-radius:4px;padding:2px 4px;margin-top:3px';
+      const o0 = document.createElement('option'); o0.textContent = 'fit another line…'; o0.value = ''; sel.appendChild(o0);
+      spec.primary.names.forEach((nm, idx) => {
+        const s = rec.u.series[idx + 1];
+        if (nm === ln.nm || !s || s.show === false) return;
+        const o = document.createElement('option'); o.value = nm; o.textContent = nm; sel.appendChild(o);
+      });
+      sel.onchange = () => {
+        if (!sel.value) return;
+        ln.nm = sel.value; ln.c = SERIES_COLORS[chartId + '|' + sel.value] || ln.c;
+        saveDrawLineStore(); onChange();
+      };
+      body.appendChild(document.createElement('br')); body.appendChild(sel);
+    } else {
+      const { dtH, K } = lineStats(ln.x1, ln.y1, ln.x2, ln.y2);
+      const un = ln.u ? ln.u : 'degree';
+      body.innerHTML = (ln.nm ? '<span style="color:' + ln.c + '">■</span> <b>' + escapeHtml(ln.nm) + ' trend</b>' : '<b>line ' + (i + 1) + '</b>') + ' — K ≈ ' +
+        sign(K) + K.toFixed(4) + ' ' + un + '/hr  (' + sign(K * 24) + (K * 24).toFixed(3) + ' ' + un + '/day)  <span class="n">over ' + dtH.toFixed(2) + ' h (hand-drawn, not fitted)</span>';
+    }
+    const del = document.createElement('button'); del.type = 'button'; del.title = 'delete this line'; del.textContent = '×';
+    del.onclick = () => {
+      drawLineStore[chartId] = (drawLineStore[chartId] || []).filter(l => l.id !== ln.id);
       if (!drawLineStore[chartId].length) delete drawLineStore[chartId];
       saveDrawLineStore();
-      onDelete();
+      onChange();
     };
+    row.append(body, del);
+    listEl.appendChild(row);
   });
 }
 
@@ -3308,8 +3968,8 @@ function makeChartNow(spec){
     measureBtn.title = 'toggle on, then zoom/pan to the time window you want measured (drag, 6h/24h, or double-click the axis) — the rate (K, degree/hr and degree/day) for every visible channel updates live for whatever window is on screen';
     measureRow.appendChild(measureBtn);
     drawLineBtn = document.createElement('button');
-    drawLineBtn.textContent = 'draw line';
-    drawLineBtn.title = 'toggle on, then click two points on the chart to draw a straight reference line between them and read its slope (K, degree/hr and degree/day) — stays on so you can add more than one; click again to turn off. Lines are saved and survive a reload — delete any of them from the list below.';
+    drawLineBtn.textContent = 'draw & fit';
+    drawLineBtn.title = 'toggle on, then click the START and the END of the stretch you care about: the line is fitted (least squares) to the data of the series that passes closest to your two clicks. The list below shows which series, the time window, slope and R², and lets you switch to another series.';
     measureRow.appendChild(drawLineBtn);
     wrap.appendChild(measureRow);
     measureReadout = document.createElement('div');
@@ -3357,6 +4017,7 @@ function makeChartNow(spec){
     const color = nextColor(spec.primary.chOwner);
     series.push({ label: nm, stroke: color, width: 1.8, scale: 'y', spanGaps: false, points: { show: false } });
     data.push(spec.primary.chOwner.CH[nm]);
+    SERIES_COLORS[spec.id + '|' + nm] = color;
     legendMeta.push({ nm, color, area: false });
   });
   let dailyBarsMax = null;
@@ -3529,6 +4190,7 @@ function makeChartNow(spec){
     if (spec.rolling3Thresholds) drawHooks.push(drawThresholdsHook(() => spec.rolling3Thresholds().map(t => ({ ...t, scale: 'y2' }))));
   }
   if (spec.measurable || trendBtn) drawHooks.push(drawUserLinesHook(spec));
+  drawHooks.push(drawNotesHook(spec));
   if (trendBtn){
     drawHooks.push(u => {
       if (!trendArmed) return;
@@ -3588,8 +4250,7 @@ function makeChartNow(spec){
     };
     const pinRows = rows => {
       rows.forEach(r => {
-        const y1 = r.a * ((r.xFirst - r.t0) / 3600) + r.b, y2 = r.a * ((r.xLast - r.t0) / 3600) + r.b;
-        (drawLineStore[spec.id] = drawLineStore[spec.id] || []).push({ id: drawLineIdSeq++, x1: r.xFirst, y1, x2: r.xLast, y2, c: r.color, nm: r.nm, u: trendUnit || '' });
+        (drawLineStore[spec.id] = drawLineStore[spec.id] || []).push({ id: drawLineIdSeq++, fit: true, pin: true, nm: r.nm, c: r.color, u: trendUnit || '', w1: spec._trend.xMin, w2: spec._trend.xMax });
       });
       saveDrawLineStore();
       refreshPins();
@@ -3601,7 +4262,7 @@ function makeChartNow(spec){
       pinRows(spec._trend.rows.filter(r => r.nm === tr.dataset.nm));
     });
     trendClearBtn.onclick = () => {
-      const keep = (drawLineStore[spec.id] || []).filter(l => !l.nm);
+      const keep = (drawLineStore[spec.id] || []).filter(l => !l.pin && !(l.nm && !l.fit));
       if (keep.length) drawLineStore[spec.id] = keep; else delete drawLineStore[spec.id];
       saveDrawLineStore();
       refreshPins();
@@ -3653,7 +4314,7 @@ function makeChartNow(spec){
       drawArmed = !drawArmed;
       pendingPoint = null; downXY = null;
       clearPreview();
-      drawLineBtn.textContent = drawArmed ? 'draw line: on' : 'draw line';
+      drawLineBtn.textContent = drawArmed ? 'draw & fit: on' : 'draw & fit';
       drawLineBtn.classList.toggle('on', drawArmed);
       u.over.style.cursor = drawArmed ? 'crosshair' : '';
     };
@@ -3671,7 +4332,8 @@ function makeChartNow(spec){
       const xVal = xMin + ((e.clientX - rect.left) / rect.width) * (xMax - xMin);
       const yVal = u.posToVal(e.clientY - rect.top, 'y');
       if (xVal == null || yVal == null || isNaN(xVal) || isNaN(yVal)) return;
-      drawPreview[spec.id] = { x1: pendingPoint.x, y1: pendingPoint.y, x2: xVal, y2: yVal };
+      const pk = pickFitSeries(u, spec, pendingPoint, { x: xVal, y: yVal });
+      drawPreview[spec.id] = { x1: pendingPoint.x, y1: pendingPoint.y, x2: xVal, y2: yVal, nm: pk ? pk.nm : null };
       if (previewRAF) return;
       previewRAF = requestAnimationFrame(() => { previewRAF = null; u.redraw(); });
     });
@@ -3692,10 +4354,17 @@ function makeChartNow(spec){
       const yVal = u.posToVal(e.clientY - rect.top, 'y');
       if (xVal == null || yVal == null || isNaN(xVal) || isNaN(yVal)) return;
       if (!pendingPoint){ pendingPoint = { x: xVal, y: yVal }; return; }
-      const { x1, y1, x2, y2 } = lineStats(pendingPoint.x, pendingPoint.y, xVal, yVal);
+      const p1 = pendingPoint, p2 = { x: xVal, y: yVal };
       pendingPoint = null;
       clearPreview();
-      (drawLineStore[spec.id] = drawLineStore[spec.id] || []).push({ id: drawLineIdSeq++, x1, y1, x2, y2 });
+      const pick = pickFitSeries(u, spec, p1, p2);
+      const w1 = Math.min(p1.x, p2.x), w2 = Math.max(p1.x, p2.x);
+      if (pick && w2 - w1 >= 120){
+        (drawLineStore[spec.id] = drawLineStore[spec.id] || []).push({ id: drawLineIdSeq++, fit: true, nm: pick.nm, c: SERIES_COLORS[spec.id + '|' + pick.nm], u: trendUnit || '', w1, w2 });
+      } else {
+        const { x1, y1, x2, y2 } = lineStats(p1.x, p1.y, p2.x, p2.y);
+        (drawLineStore[spec.id] = drawLineStore[spec.id] || []).push({ id: drawLineIdSeq++, x1, y1, x2, y2 });
+      }
       saveDrawLineStore();
       refreshDrawLines();
     });
@@ -5303,6 +5972,7 @@ settingsBtn.textContent = 'settings';
 settingsBtn.title = 'boundary lines, warning model (1 or 2), thresholds, the TPM early-warning toggle, and the sensor-fault filter';
 settingsBtn.onclick = openSettingsModal;
 navGroup.appendChild(settingsBtn);
+addSyncAndNotesButtons(navGroup);
 
 // ==================== settings popup ====================
 const RAIN_FIELDS = [

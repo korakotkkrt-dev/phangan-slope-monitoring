@@ -12,6 +12,12 @@ trend lines, splice / filter tools and a phone-friendly layout.
 * The workflow `.github/workflows/update.yml` runs both **every day at 07:30 (Thailand time)**, commits the new data and publishes the page
   with GitHub Pages. Change the `cron:` line to update more often; the **Run workflow** button in the *Actions* tab updates it right away.
 
+## Shared settings and field notes
+Splices, value filters, pinned lines, thresholds, sensor marks and **field notes** are stored in the browser. To use the same ones on every device,
+open **sync** → paste a fine-grained GitHub token that has *Contents: read and write* for this repository only (kept in that browser) →
+changes are saved to `config/settings.json` and every other device loads them when it opens the page. Without a token a device can still read
+the shared settings but cannot change them. A device with unsaved changes is never overwritten silently (it asks which version to keep).
+
 ## Using it on a phone
 * One finger drags the time axis, two fingers pinch to zoom; tap a legend entry to hide/show a channel; **values** shows the readings under your finger.
 * Long explanations fold to three lines — tap to read the rest. Charts are built when they scroll into view, so the first screen opens quickly.
