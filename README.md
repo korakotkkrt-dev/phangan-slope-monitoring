@@ -13,7 +13,7 @@ trend lines, splice / filter tools and a phone-friendly layout.
   with GitHub Pages. Change the `cron:` line to update more often; the **Run workflow** button in the *Actions* tab updates it right away.
 
 ## Using it on a phone
-* One finger drags the time axis, two fingers pinch to zoom; double tap a legend entry to isolate a channel; **values** shows the readings under your finger.
+* One finger drags the time axis, two fingers pinch to zoom; tap a legend entry to hide/show a channel; **values** shows the readings under your finger.
 * Long explanations fold to three lines — tap to read the rest. Charts are built when they scroll into view, so the first screen opens quickly.
 
 ## Notes
