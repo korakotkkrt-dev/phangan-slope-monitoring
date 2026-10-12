@@ -1,0 +1,326 @@
+{
+ "st1": [
+  {
+   "name": "rainfall",
+   "scale": 0.001,
+   "lo": 0
+  },
+  {
+   "name": "wind_speed",
+   "scale": 0.001,
+   "lo": 0
+  },
+  {
+   "name": "wind_direction",
+   "scale": 0.01,
+   "lo": 0
+  },
+  {
+   "name": "air_humidity",
+   "scale": 0.001,
+   "lo": 0
+  },
+  {
+   "name": "air_temp",
+   "scale": 0.001,
+   "lo": 0
+  },
+  {
+   "name": "soil_moisture_1",
+   "scale": 0.001,
+   "lo": 0
+  },
+  {
+   "name": "soil_temp_1",
+   "scale": 0.001,
+   "lo": 0
+  },
+  {
+   "name": "soil_moisture_2",
+   "scale": 0.001,
+   "lo": 0
+  },
+  {
+   "name": "soil_temp_2",
+   "scale": 0.001,
+   "lo": 0
+  },
+  {
+   "name": "soil_moisture_3",
+   "scale": 0.001,
+   "lo": 0
+  },
+  {
+   "name": "soil_temp_3",
+   "scale": 0.001,
+   "lo": 0
+  },
+  {
+   "name": "tilt_1_x",
+   "scale": 0.01,
+   "lo": 0
+  },
+  {
+   "name": "tilt_1_y",
+   "scale": 0.01,
+   "lo": 0
+  },
+  {
+   "name": "tilt_3_x",
+   "scale": 0.01,
+   "lo": 0
+  },
+  {
+   "name": "tilt_3_y",
+   "scale": 0.01,
+   "lo": 0
+  },
+  {
+   "name": "alarm",
+   "scale": 0.001,
+   "lo": 0
+  },
+  {
+   "name": "soil_temp_6",
+   "scale": 0.001,
+   "lo": 0
+  },
+  {
+   "name": "soil_moisture_6",
+   "scale": 0.001,
+   "lo": 0
+  },
+  {
+   "name": "soil_temp_5",
+   "scale": 0.001,
+   "lo": 0
+  },
+  {
+   "name": "soil_moisture_5",
+   "scale": 0.001,
+   "lo": 0
+  },
+  {
+   "name": "soil_temp_4",
+   "scale": 0.001,
+   "lo": 0
+  },
+  {
+   "name": "soil_moisture_4",
+   "scale": 0.001,
+   "lo": 0
+  },
+  {
+   "name": "tilt_7",
+   "scale": 0.01,
+   "lo": 0
+  },
+  {
+   "name": "tilt_6",
+   "scale": 0.01,
+   "lo": 0
+  },
+  {
+   "name": "tilt_5",
+   "scale": 0.01,
+   "lo": 0
+  },
+  {
+   "name": "tilt_2_y",
+   "scale": 0.01,
+   "lo": 0
+  },
+  {
+   "name": "tilt_2_x",
+   "scale": 0.01,
+   "lo": 0
+  },
+  {
+   "name": "rainfall_rate",
+   "scale": 0.001,
+   "lo": 0
+  },
+  {
+   "name": "tilt_4_y",
+   "scale": 0.01,
+   "lo": 0
+  },
+  {
+   "name": "tilt_4_x",
+   "scale": 0.01,
+   "lo": 0
+  },
+  {
+   "name": "tilt_9",
+   "scale": 0.01,
+   "lo": 0
+  },
+  {
+   "name": "tilt_8",
+   "scale": 0.01,
+   "lo": 0
+  },
+  {
+   "name": "alarm1",
+   "scale": 0.001,
+   "lo": 0
+  },
+  {
+   "name": "alarm2",
+   "scale": 0.001,
+   "lo": 0
+  }
+ ],
+ "st2": [
+  {
+   "name": "rainfall",
+   "scale": 0.001,
+   "lo": 0
+  },
+  {
+   "name": "wind_speed",
+   "scale": 0.001,
+   "lo": 0
+  },
+  {
+   "name": "wind_direction",
+   "scale": 0.01,
+   "lo": 0
+  },
+  {
+   "name": "temp",
+   "scale": 0.001,
+   "lo": 0
+  },
+  {
+   "name": "air_humidity",
+   "scale": 0.001,
+   "lo": 0
+  },
+  {
+   "name": "air_temp",
+   "scale": 0.001,
+   "lo": 0
+  },
+  {
+   "name": "soil_moisture_1",
+   "scale": 0.001,
+   "lo": 0
+  },
+  {
+   "name": "soil_temp_1",
+   "scale": 0.001,
+   "lo": 0
+  },
+  {
+   "name": "soil_moisture_2",
+   "scale": 0.001,
+   "lo": 0
+  },
+  {
+   "name": "soil_moisture_3",
+   "scale": 0.001,
+   "lo": 0
+  },
+  {
+   "name": "tilt_1_x",
+   "scale": 0.01,
+   "lo": 0
+  },
+  {
+   "name": "tilt_1_y",
+   "scale": 0.01,
+   "lo": 0
+  },
+  {
+   "name": "tilt_3_x",
+   "scale": 0.01,
+   "lo": 0
+  },
+  {
+   "name": "tilt_3_y",
+   "scale": 0.01,
+   "lo": 0
+  },
+  {
+   "name": "alarm",
+   "scale": 0.001,
+   "lo": 0
+  },
+  {
+   "name": "soil_moisture_6",
+   "scale": 0.001,
+   "lo": 0
+  },
+  {
+   "name": "soil_moisture_5",
+   "scale": 0.001,
+   "lo": 0
+  },
+  {
+   "name": "soil_moisture_4",
+   "scale": 0.001,
+   "lo": 0
+  },
+  {
+   "name": "tilt_6",
+   "scale": 0.01,
+   "lo": 0
+  },
+  {
+   "name": "tilt_5",
+   "scale": 0.01,
+   "lo": 0
+  },
+  {
+   "name": "tilt_2_y",
+   "scale": 0.01,
+   "lo": 0
+  },
+  {
+   "name": "tilt_2_x",
+   "scale": 0.01,
+   "lo": 0
+  },
+  {
+   "name": "rainfall_rate",
+   "scale": 0.001,
+   "lo": 0
+  },
+  {
+   "name": "soil_temp_8",
+   "scale": 0.001,
+   "lo": 0
+  },
+  {
+   "name": "soil_moisture_8",
+   "scale": 0.001,
+   "lo": 0
+  },
+  {
+   "name": "soil_moisture_7",
+   "scale": 0.001,
+   "lo": 0
+  },
+  {
+   "name": "tilt_4_y",
+   "scale": 0.01,
+   "lo": 0
+  },
+  {
+   "name": "tilt_4_x",
+   "scale": 0.01,
+   "lo": 0
+  },
+  {
+   "name": "alarm1",
+   "scale": 0.001,
+   "lo": 0
+  },
+  {
+   "name": "alarm2",
+   "scale": 0.001,
+   "lo": 0
+  }
+ ]
+}
