@@ -225,7 +225,8 @@ kbd{font:10.5px "IBM Plex Mono",monospace;background:var(--panel);border:1px sol
 .measure-readout b{color:var(--ink);font-weight:600}
 .measure-readout .n{color:var(--ink-3)}
 .drawline-list{display:flex;flex-direction:column;gap:4px}
-.trend-readout{overflow:auto;max-height:260px}
+.measure-readout.trend-readout,.measure-readout.drawline-list{max-width:none;width:100%;box-sizing:border-box}
+.trend-readout{overflow:auto;max-height:min(60vh,520px)}
 .fit-tag{display:inline-block;min-width:22px;padding:0 6px;border-radius:9px;color:#fff;font:bold 10px 'IBM Plex Mono',monospace;text-align:center;line-height:16px}
 .trend-readout .tr-table{border-collapse:collapse;width:100%;font-size:11px}
 .trend-readout .tr-table th{text-align:right;font-weight:500;color:var(--ink-3);padding:2px 8px;border-bottom:1px solid var(--line-soft)}
