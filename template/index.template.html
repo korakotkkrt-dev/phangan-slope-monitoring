@@ -225,7 +225,8 @@ kbd{font:10.5px "IBM Plex Mono",monospace;background:var(--panel);border:1px sol
 .measure-readout b{color:var(--ink);font-weight:600}
 .measure-readout .n{color:var(--ink-3)}
 .drawline-list{display:flex;flex-direction:column;gap:4px}
-.trend-readout{overflow-x:auto}
+.trend-readout{overflow:auto;max-height:260px}
+.fit-tag{display:inline-block;min-width:22px;padding:0 6px;border-radius:9px;color:#fff;font:bold 10px 'IBM Plex Mono',monospace;text-align:center;line-height:16px}
 .trend-readout .tr-table{border-collapse:collapse;width:100%;font-size:11px}
 .trend-readout .tr-table th{text-align:right;font-weight:500;color:var(--ink-3);padding:2px 8px;border-bottom:1px solid var(--line-soft)}
 .trend-readout .tr-table td{text-align:right;padding:2px 8px;white-space:nowrap}
@@ -2660,8 +2661,8 @@ function renderTrendReadout(fit, unit){
   const un = unit || '';
   const head = '<div class="measure-range">trendline \u00b7 least-squares fit \u00b7 window: ' + fmtDate(fit.xMin) + ' \u2192 ' + fmtDate(fit.xMax) +
     '  (' + ((fit.xMax - fit.xMin) / 3600).toFixed(1) + ' h)' + (fit.excl ? ' · ' + fit.excl.toLocaleString() + ' sensor-fault samples left out' : '') + '</div>';
-  const body = fit.rows.length ? ('<table class="tr-table"><thead><tr><th>series</th><th>slope /h</th><th>slope /day</th><th>b (start)</th><th>R²</th><th>n</th><th></th></tr></thead><tbody>' + fit.rows.map(r =>
-    '<tr class="tr-click" data-nm="' + escapeHtml(r.nm) + '" title="click to pin just this line"><td><i class="tr-sw" style="border-color:' + r.color + '"></i><b>' + escapeHtml(r.nm) + '</b></td>' +
+  const body = fit.rows.length ? ('<table class="tr-table"><thead><tr><th>#</th><th>series</th><th>slope /h</th><th>slope /day</th><th>b (start)</th><th>R²</th><th>n</th><th></th></tr></thead><tbody>' + fit.rows.map((r, ri) =>
+    '<tr class="tr-click" data-nm="' + escapeHtml(r.nm) + '" title="click to pin just this line"><td><span class="fit-tag" style="background:' + r.color + '">T' + (ri + 1) + '</span></td><td><i class="tr-sw" style="border-color:' + r.color + '"></i><b>' + escapeHtml(r.nm) + '</b></td>' +
     '<td class="tr-slope">' + fmtSlope(r.a) + '</td><td>' + fmtSlope(r.a * 24) + '</td>' +
     '<td>' + (r.b >= 0 ? '' : '−') + Math.abs(r.b).toFixed(3) + '</td>' +
     '<td>' + (r.r2 === r.r2 ? r.r2.toFixed(3) : 'n/a') + '</td><td>' + r.n.toLocaleString() + '</td>' +
@@ -2684,7 +2685,8 @@ function trendDrawHook(spec, getArmed){
     ctx.beginPath(); ctx.rect(left, top, width, height); ctx.clip();
     ctx.font = (11 * dpr) + 'px "IBM Plex Mono", monospace';
     ctx.textBaseline = 'bottom';
-    fit.rows.forEach(r => {
+    const tags = [];
+    fit.rows.forEach((r, ri) => {
       const x1 = r.xFirst, x2 = r.xLast;
       const y1 = r.a * ((x1 - r.t0) / 3600) + r.b, y2 = r.a * ((x2 - r.t0) / 3600) + r.b;
       const px1 = xToPx(x1), px2 = xToPx(x2), py1 = u.valToPos(y1, 'y', true), py2 = u.valToPos(y2, 'y', true);
@@ -2694,7 +2696,9 @@ function trendDrawHook(spec, getArmed){
       ctx.beginPath(); ctx.moveTo(px1, py1); ctx.lineTo(px2, py2); ctx.stroke();
       ctx.globalAlpha = 1; ctx.lineWidth = 2.2 * dpr; ctx.strokeStyle = r.color; ctx.setLineDash([9 * dpr, 6 * dpr]);
       ctx.beginPath(); ctx.moveTo(px1, py1); ctx.lineTo(px2, py2); ctx.stroke();
+      tags.push({ text: 'T' + (ri + 1), x: px2, y: py2, col: r.color });
     });
+    drawFitTags(ctx, tags, dpr, left, top, width, height);
     ctx.restore();
   };
 }
@@ -2845,6 +2849,33 @@ function fitText(f, un){
   return sg(f.a) + ' ' + un + '/h';
 }
 
+
+// numbered tags (F1, F2 ...) at the right end of each fitted line - the numbers match the rows in the list above the chart,
+// so no text is printed over the data any more. Tags that would sit on top of each other are pushed apart vertically.
+function drawFitTags(ctx, tags, dpr, left, top, width, height){
+  if (!tags.length) return;
+  tags.forEach(t => { t.y0 = t.y; });
+  tags.sort((p, q) => p.y - q.y);
+  const gap = 17 * dpr;
+  for (let i = 1; i < tags.length; i++){
+    if (Math.abs(tags[i].x - tags[i - 1].x) < 40 * dpr && tags[i].y - tags[i - 1].y < gap) tags[i].y = tags[i - 1].y + gap;
+  }
+  ctx.save();
+  ctx.font = 'bold ' + (10 * dpr) + 'px "IBM Plex Mono", monospace';
+  ctx.textBaseline = 'middle'; ctx.textAlign = 'center'; ctx.setLineDash([]);
+  tags.forEach(t => {
+    const w = ctx.measureText(t.text).width + 10 * dpr, h = 15 * dpr;
+    const x = Math.min(Math.max(t.x + w / 2 + 3 * dpr, left + w / 2), left + width - w / 2), y = Math.min(Math.max(t.y, top + h / 2), top + height - h / 2);
+    if (Math.abs(y - t.y0) > 3 * dpr){ ctx.strokeStyle = t.col; ctx.lineWidth = 1 * dpr; ctx.beginPath(); ctx.moveTo(t.x, t.y0); ctx.lineTo(x - w / 2, y); ctx.stroke(); }
+    ctx.fillStyle = t.col; ctx.strokeStyle = COLOR_PANEL; ctx.lineWidth = 2 * dpr;
+    const r = h / 2;
+    ctx.beginPath(); ctx.moveTo(x - w / 2 + r, y - h / 2); ctx.arcTo(x + w / 2, y - h / 2, x + w / 2, y + h / 2, r); ctx.arcTo(x + w / 2, y + h / 2, x - w / 2, y + h / 2, r); ctx.arcTo(x - w / 2, y + h / 2, x - w / 2, y - h / 2, r); ctx.arcTo(x - w / 2, y - h / 2, x + w / 2, y - h / 2, r); ctx.closePath();
+    ctx.stroke(); ctx.fill();
+    ctx.fillStyle = '#fff'; ctx.fillText(t.text, x, y + 0.5 * dpr);
+  });
+  ctx.restore();
+}
+
 function drawUserLinesHook(spec){
   return u => {
     const lines = drawLineStore[spec.id];
@@ -2861,6 +2892,8 @@ function drawUserLinesHook(spec){
     ctx.beginPath(); ctx.rect(left, top, width, height); ctx.clip();
     ctx.font = (11 * dpr) + 'px "IBM Plex Mono", monospace';
     ctx.textBaseline = 'bottom';
+    const tags = [];
+    let fitNo = 0;
     (lines || []).forEach(ln => {
       let x1 = ln.x1, y1 = ln.y1, x2 = ln.x2, y2 = ln.y2, label, col = ln.c || COLOR_DRAWLINE;
       if (ln.fit){
@@ -2872,7 +2905,7 @@ function drawUserLinesHook(spec){
         // the chosen stretch, lightly shaded
         const bx1 = xToPx(f.w1), bx2 = xToPx(f.w2);
         ctx.save(); ctx.globalAlpha = 0.07; ctx.fillStyle = col; ctx.fillRect(Math.min(bx1, bx2), top, Math.abs(bx2 - bx1), height); ctx.restore();
-        label = ln.nm + '  ' + fmtSlope(f.a) + (ln.u || '') + '/h  R² ' + (f.r2 === f.r2 ? f.r2.toFixed(2) : 'n/a');
+        fitNo++; label = 'F' + fitNo;
       } else {
         const { K } = lineStats(x1, y1, x2, y2);
         label = 'K ≈ ' + (K >= 0 ? '+' : '') + K.toFixed(4) + (ln.u || '°') + '/hr';
@@ -2889,11 +2922,9 @@ function drawUserLinesHook(spec){
         ctx.beginPath(); ctx.arc(px, py, 3 * dpr, 0, 2 * Math.PI);
         ctx.fillStyle = col; ctx.fill();
       });
-      const tw = ctx.measureText(label).width + 8 * dpr;
-      const tx = Math.min(Math.max((px1 + px2) / 2 + 6 * dpr, left + 2 * dpr), left + width - tw - 2 * dpr), ty = (py1 + py2) / 2 - 8 * dpr;
-      ctx.globalAlpha = 0.85; ctx.fillStyle = COLOR_PANEL; ctx.fillRect(tx - 3 * dpr, ty - 12 * dpr, tw, 15 * dpr);
-      ctx.globalAlpha = 1; ctx.fillStyle = col; ctx.fillText(label, tx + dpr, ty);
+      if (ln.fit) tags.push({ text: label, x: px2, y: py2, col });
     });
+    drawFitTags(ctx, tags, dpr, left, top, width, height);
     // aiming: the stretch between the first click and the cursor, plus which series it would fit
     if (preview){
       const bx1 = xToPx(preview.x1), bx2 = xToPx(preview.x2);
@@ -2918,6 +2949,7 @@ function renderDrawLineList(chartId, listEl, onChange){
   listEl.innerHTML = '';
   const rec = charts.find(c => c.id === chartId), spec = chartSpecs.find(s => s.id === chartId);
   const sign = v => (v >= 0 ? '+' : '');
+  let fitNo = 0;
   lines.forEach((ln, i) => {
     const row = document.createElement('div'); row.className = 'drawline-row'; row.dataset.id = ln.id;
     const body = document.createElement('span'); body.style.cssText = 'flex:1;min-width:0';
@@ -2930,11 +2962,13 @@ function renderDrawLineList(chartId, listEl, onChange){
         const warns = [];
         if (f.r2 === f.r2 && f.r2 < 0.3) warns.push('weak fit');
         if (f.n < 10) warns.push('few points');
-        body.innerHTML = '<span style="color:' + col + '">■</span> <b>' + escapeHtml(ln.nm) + '</b> — slope <b>' + fmtSlope(f.a) + ' ' + un + '/h</b> (' + fmtSlope(f.a * 24) + ' ' + un + '/day) · R² ' + (f.r2 === f.r2 ? f.r2.toFixed(3) : 'n/a') + ' · n ' + f.n.toLocaleString() +
+        fitNo++;
+        body.innerHTML = '<span class="fit-tag" style="background:' + col + '">F' + fitNo + '</span> <b>' + escapeHtml(ln.nm) + '</b> — slope <b>' + fmtSlope(f.a) + ' ' + un + '/h</b> (' + fmtSlope(f.a * 24) + ' ' + un + '/day) · R² ' + (f.r2 === f.r2 ? f.r2.toFixed(3) : 'n/a') + ' · n ' + f.n.toLocaleString() +
           (warns.length ? ' <span class="tr-warn">⚠ ' + warns.join(', ') + '</span>' : '') +
           '<br><span class="n">window ' + fmtDate(f.w1) + ' → ' + fmtDate(f.w2) + ' (' + (hrs < 48 ? hrs.toFixed(1) + ' h' : (hrs / 24).toFixed(1) + ' d') + ') · y = ' + fmtSlope(f.a) + '·t ' + (f.b >= 0 ? '+ ' : '− ') + Math.abs(f.b).toFixed(3) + ' (t in hours from window start)' + (f.excl ? ' · ' + f.excl + ' fault samples left out' : '') + '</span>';
       } else {
-        body.innerHTML = '<span style="color:' + col + '">■</span> <b>' + escapeHtml(ln.nm) + '</b> — <span class="n">not enough data in this window (series hidden, filtered out or missing)</span>';
+        fitNo++;
+        body.innerHTML = '<span class="fit-tag" style="background:' + col + '">F' + fitNo + '</span> <b>' + escapeHtml(ln.nm) + '</b> — <span class="n">not enough data in this window (series hidden, filtered out or missing)</span>';
       }
       const sel = document.createElement('select');
       sel.title = 'fit this stretch on another series';
@@ -3736,7 +3770,24 @@ function attachChartTools(h, u, spec, primaryNames, legendMeta, legend, chOwner)
   shiftBtn.title = 'join the graph across a sensor outage / swap / reinstall: offset the new segment so the line continues (auto or manual) — what-if only';
   shiftBtn.onclick = e => { e.stopPropagation(); closeShowPopover(); closeFilterPopover(); openShiftEditor(shiftBtn, u, spec, primaryNames, chOwner, badge); };
 
-  tools.append(badge, filterBadge, showBtn, filterBtn, shiftBtn, makePngButton(() => u.ctx.canvas, spec.id));
+  const SIZE_STEPS = [1, 1.5, 2, 3];
+  const sizeStore = (() => { try { return JSON.parse(localStorage.getItem('psw_chartsize_v1')) || {}; } catch (e){ return {}; } })();
+  const baseH = u.height;
+  let sizeIdx = Math.max(0, SIZE_STEPS.indexOf(sizeStore[spec.id] || 1));
+  const sizeBtn = document.createElement('button');
+  sizeBtn.className = 'chart-tool-btn'; sizeBtn.type = 'button';
+  sizeBtn.title = 'make this chart taller: 1x, 1.5x, 2x, 3x (remembered for this chart)';
+  sizeBtn.textContent = 'size ' + SIZE_STEPS[sizeIdx] + 'x';
+  const applySize = () => { sizeBtn.textContent = 'size ' + SIZE_STEPS[sizeIdx] + 'x'; u.setSize({ width: u.width, height: Math.round(baseH * SIZE_STEPS[sizeIdx]) }); };
+  sizeBtn.onclick = e => {
+    e.stopPropagation();
+    sizeIdx = (sizeIdx + 1) % SIZE_STEPS.length;
+    sizeStore[spec.id] = SIZE_STEPS[sizeIdx];
+    try { localStorage.setItem('psw_chartsize_v1', JSON.stringify(sizeStore)); } catch (err){ /* private mode */ }
+    applySize();
+  };
+  if (sizeIdx > 0) requestAnimationFrame(applySize);
+  tools.append(badge, filterBadge, showBtn, filterBtn, shiftBtn, sizeBtn, makePngButton(() => u.ctx.canvas, spec.id));
   h.appendChild(tools);
 
   // Reapply anything saved from a previous visit — filter first (a saved
@@ -4212,7 +4263,7 @@ function makeChartNow(spec){
 
   const opts = {
     width: holder.clientWidth || 1400,
-    height: NARROW_SCREEN ? Math.max(300, spec.height || 0) : (spec.height || Math.max(210, 80 + primaryNames.length * 7)),
+    height: NARROW_SCREEN ? Math.max(300, spec.height || 0) : Math.max(spec.height || 0, spec.measurable ? 380 : 260, 80 + primaryNames.length * 7),
     tzDate: ts => uPlot.tzDate(new Date(ts * 1e3), 'Asia/Bangkok'),
     cursor: { sync: { key: 'drr' }, drag: { x: true, y: false, uni: 20 } },
     scales,
@@ -4233,7 +4284,6 @@ function makeChartNow(spec){
   applyCurXToNewChart(u);
 
   if (trendBtn){
-    holder.after(trendReadout);
     const pinList = drawLineList || (() => { const d = document.createElement('div'); d.style.display = 'none'; trendReadout.after(d); return d; })();
     const refreshPins = () => { renderDrawLineList(spec.id, pinList, refreshPins); u.redraw(); };
     if (!spec.measurable) renderDrawLineList(spec.id, pinList, refreshPins);
