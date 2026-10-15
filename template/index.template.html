@@ -1913,7 +1913,7 @@ THRESHOLD_CONSUMERS.push(renderOverviewTiles);
 const SYNC_CFG = { owner: 'korakotkkrt-dev', repo: 'phangan-slope-monitoring', path: 'config/settings.json', branch: 'main' };
 const SYNC_KEYS = {
   thresholds: 'psw_thresholds_v1', drawlines: 'psw_drawlines_v1', shift: 'psw_shift_v1', filter: 'psw_filter_v1',
-  range: 'psw_range_v1', topview: 'psw_topview_v2', notes: 'psw_notes_v1',
+  range: 'psw_range_v1', topview: 'psw_topview_v2', notes: 'psw_notes_v1', alias: 'psw_alias_v1',
 };
 const SYNC_TOKEN_KEY = 'psw_gh_token', SYNC_REV_KEY = 'psw_sync_rev', SYNC_SNAP_KEY = 'psw_sync_snap', SYNC_AUTO_KEY = 'psw_sync_auto', SYNC_GUARD_KEY = 'psw_sync_reloaded';
 const SYNC_ENABLED = /github\.io$/.test(location.hostname) || /[?&]sync=1/.test(location.search);
@@ -2110,6 +2110,11 @@ function addSyncAndNotesButtons(group){
   notesBtn.title = 'field notes: sensor swaps, maintenance, rain events — shown as dotted lines on the charts';
   notesBtn.onclick = () => { syncPopover.classList.remove('show'); renderNotesPopover(); positionPopoverNear(notesPopover, notesBtn); };
   group.appendChild(notesBtn);
+  const aliasBtn = document.createElement('button');
+  aliasBtn.textContent = 'rename'; aliasBtn.className = 'sync-btn';
+  aliasBtn.title = 'give the sensors of this station names that are easier to read (display only)';
+  aliasBtn.onclick = () => { syncPopover.classList.remove('show'); notesPopover.classList.remove('show'); renderAliasPopover(); positionPopoverNear(aliasPopover, aliasBtn); };
+  group.appendChild(aliasBtn);
   const btn = document.createElement('button');
   btn.textContent = 'sync'; btn.className = 'sync-btn'; btn.dataset.state = 'idle';
   btn.title = 'shared settings';
@@ -2243,6 +2248,87 @@ function renderNotesPopover(){
   };
   const close = mkEl('button', null, 'close'); close.onclick = () => p.classList.remove('show');
   btns.append(add, close); p.appendChild(btns);
+}
+
+// ---- rename sensors: display names only (data keys such as tilt_3_y never change) ---------------------------
+// Stored per station in localStorage 'psw_alias_v1' as { st1: { tilt_3_y: 'Rock Y (road-normal)' }, ... } and shared through the same
+// settings file as the other settings. Charts, legends, trendline / draw & fit tables show the new name.
+function getAliases(){
+  try { const v = JSON.parse(lsGet(SYNC_KEYS.alias) || '{}'); return (v && typeof v === 'object' && !Array.isArray(v)) ? v : {}; } catch (e){ return {}; }
+}
+let ALIASES = getAliases();
+function aliasFor(station, nm){ const m = ALIASES[station]; return (m && m[nm]) ? m[nm] : null; }
+function dispName(nm, station){ return aliasFor(station || (typeof activeStation !== 'undefined' ? activeStation : ''), nm) || nm; }
+function aliasStationOf(node){
+  const el = node.nodeType === 1 ? node : node.parentElement;
+  const w = el && el.closest ? el.closest('.chart[data-section]') : null;
+  return w ? w.dataset.section : (typeof activeStation !== 'undefined' ? activeStation : '');
+}
+function aliasTextNode(tn){
+  const raw = (tn.__aliasOrig !== undefined) ? tn.__aliasOrig : tn.nodeValue;
+  const key = raw.trim();
+  if (!key || key.length > 40) return;
+  const a = aliasFor(aliasStationOf(tn), key);
+  if (a){ tn.__aliasOrig = raw; const v = raw.replace(key, a); if (tn.nodeValue !== v) tn.nodeValue = v; }
+  else if (tn.__aliasOrig !== undefined){ if (tn.nodeValue !== tn.__aliasOrig) tn.nodeValue = tn.__aliasOrig; delete tn.__aliasOrig; }
+}
+function aliasScan(root){
+  if (!root) return;
+  if (root.nodeType === 3){ aliasTextNode(root); return; }
+  if (root.nodeType !== 1) return;
+  const tw = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+  let n; const list = [];
+  while ((n = tw.nextNode())) list.push(n);
+  list.forEach(aliasTextNode);
+}
+function aliasApplyAll(){ ALIASES = getAliases(); aliasScan(document.getElementById('charts')); }
+(function aliasObserve(){
+  const host = document.getElementById('charts');
+  if (!host || window.__aliasObs) return;
+  window.__aliasObs = new MutationObserver(muts => {
+    if (!Object.keys(ALIASES).length) return;
+    muts.forEach(m => { m.addedNodes.forEach(nd => aliasScan(nd)); });
+  });
+  window.__aliasObs.observe(host, { childList: true, subtree: true });
+})();
+const aliasPopover = document.createElement('div');
+aliasPopover.className = 'cf-popover'; aliasPopover.id = 'aliasPopover';
+document.body.appendChild(aliasPopover);
+document.addEventListener('mousedown', e => {
+  if (aliasPopover.classList.contains('show') && !aliasPopover.contains(e.target) && !e.target.closest('.sync-btn')) aliasPopover.classList.remove('show');
+});
+function renderAliasPopover(){
+  const p = aliasPopover; p.innerHTML = '';
+  p.style.width = '360px'; p.style.maxHeight = 'calc(100vh - 20px)'; p.style.overflowY = 'auto';
+  p.appendChild(mkEl('div', 'cf-title', 'Rename sensors'));
+  const st = STATIONS.find(s => s.id === activeStation) || STATIONS[0];
+  const note = mkEl('div', 'note', 'Station: ' + st.label + '. The new name replaces the channel name on charts, legends and the trendline / draw & fit tables. The original name stays in the data and in "copy" for Excel as ' + 'name (original).');
+  note.style.cssText = 'font-size:10.5px;margin-bottom:6px'; p.appendChild(note);
+  const all = getAliases(); const mine = Object.assign({}, all[st.id] || {});
+  const names = Object.keys(st.CH).filter(n => /^(tilt_|soil_moisture|soil_temp)/.test(n)).sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+  const box = mkEl('div', 'cf-list'); box.style.maxHeight = '320px';
+  const inputs = {};
+  names.forEach(nm => {
+    const r = mkEl('div'); r.style.cssText = 'display:flex;gap:6px;align-items:center;margin:2px 0';
+    const l = mkEl('span', null, nm); l.style.cssText = 'width:96px;font:11px "IBM Plex Mono",monospace;color:var(--ink-3)';
+    const i = document.createElement('input'); i.type = 'text'; i.maxLength = 36; i.value = mine[nm] || ''; i.placeholder = nm; i.style.cssText = 'flex:1;min-width:0';
+    inputs[nm] = i; r.append(l, i); box.appendChild(r);
+  });
+  p.appendChild(box);
+  const btns = mkEl('div', 'cf-btns');
+  const ok = mkEl('button', 'cf-apply', 'apply');
+  ok.onclick = () => {
+    const cur = getAliases(); const m = {};
+    Object.keys(inputs).forEach(nm => { const v = inputs[nm].value.trim(); if (v && v !== nm) m[nm] = v; });
+    if (Object.keys(m).length) cur[st.id] = m; else delete cur[st.id];
+    lsSet(SYNC_KEYS.alias, JSON.stringify(cur));
+    ALIASES = cur; aliasApplyAll(); redrawVisibleLight();
+    p.classList.remove('show');
+  };
+  const rs = mkEl('button', null, 'reset this station');
+  rs.onclick = () => { Object.keys(inputs).forEach(nm => { inputs[nm].value = ''; }); };
+  const cl = mkEl('button', null, 'close'); cl.onclick = () => p.classList.remove('show');
+  btns.append(ok, rs, cl); p.appendChild(btns);
 }
 
 // ==================== chart engine ====================
@@ -2672,15 +2758,20 @@ function computeTrendFits(u, spec, colorOf){
   rows.sort((p, q) => Math.abs(q.a) - Math.abs(p.a));
   return { xMin, xMax, rows, excl: rows.reduce((a, r) => a + r.excl, 0), spk: rows.reduce((a, r) => a + (r.spk || 0), 0) };
 }
+function fmtShort(t){
+  return new Date(t * 1e3).toLocaleString('en-GB', { timeZone: 'Asia/Bangkok', day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit', hour12: false });
+}
+function speedClass(aPerH){ const v = Math.abs(aPerH); return v < 0.004 ? 'very slow' : v < 0.04 ? 'slow' : v < 0.4 ? 'moderate' : 'rapid'; }
 function renderTrendReadout(fit, unit){
   const un = unit || '';
   const head = '<div class="measure-range">trendline \u00b7 least-squares fit \u00b7 window: ' + fmtDate(fit.xMin) + ' \u2192 ' + fmtDate(fit.xMax) +
-    '  (' + ((fit.xMax - fit.xMin) / 3600).toFixed(1) + ' h)' + (fit.excl ? ' · ' + fit.excl.toLocaleString() + ' sensor-fault samples left out' : '') + '</div>';
-  const body = fit.rows.length ? ('<table class="tr-table"><thead><tr><th>#</th><th>series</th><th>slope /h</th><th>slope /day</th><th>b (start)</th><th>R²</th><th>n</th><th></th></tr></thead><tbody>' + fit.rows.map((r, ri) =>
+    '  (' + ((fit.xMax - fit.xMin) / 3600).toFixed(1) + ' h)' + (fit.excl ? ' · ' + fit.excl.toLocaleString() + ' sensor-fault samples left out' : '') + (fit.spk ? ' · ' + fit.spk.toLocaleString() + ' glitch spikes (>2 deg off the window median) left out' : '') + '</div>';
+  const body = fit.rows.length ? ('<table class="tr-table"><thead><tr><th>#</th><th>series</th><th>slope /h</th><th>slope /day</th><th>b (start)</th><th>R²</th><th>n</th><th>data used (from → to, ICT)</th><th>speed class</th><th></th></tr></thead><tbody>' + fit.rows.map((r, ri) =>
     '<tr class="tr-click" data-nm="' + escapeHtml(r.nm) + '" title="click to pin just this line"><td><span class="fit-tag" style="background:' + r.color + '">T' + (ri + 1) + '</span></td><td><i class="tr-sw" style="border-color:' + r.color + '"></i><b>' + escapeHtml(r.nm) + '</b></td>' +
     '<td class="tr-slope">' + fmtSlope(r.a) + '</td><td>' + fmtSlope(r.a * 24) + '</td>' +
     '<td>' + (r.b >= 0 ? '' : '−') + Math.abs(r.b).toFixed(3) + '</td>' +
     '<td>' + (r.r2 === r.r2 ? r.r2.toFixed(3) : 'n/a') + '</td><td>' + r.n.toLocaleString() + '</td>' +
+    '<td>' + fmtShort(r.xFirst) + ' → ' + fmtShort(r.xLast) + '</td><td>' + (un === '°' ? speedClass(r.a) : '') + '</td>' +
     '<td class="tr-warn"' + (r.warns.length ? ' title="' + escapeHtml(r.warns.join('; ')) + '">⚠ ' + (r.r2 === r.r2 && r.r2 < 0.3 ? 'weak fit' : r.warns[0].split(' —')[0]) : '>') + '</td></tr>').join('') + '</tbody></table>' +
     '<div class="tr-hint">y = slope · t + b &nbsp;(t = hours from window start, b = fitted value at window start; slope units: ' + (un || 'value') + '/h and ' + (un || 'value') + '/day). ⚠ = weak fit, few points or gaps (hover for detail).</div>')
     : '<div>no visible channel has enough valid points in this window.</div>';
@@ -4338,8 +4429,8 @@ function makeChartNow(spec){
       const fit = spec._trend;
       if (!fit) return;
       const TAB = String.fromCharCode(9), NL = String.fromCharCode(10);
-      const rowsTxt = ['series', 'slope_per_hour', 'slope_per_day', 'value_at_window_start', 'R2', 'n', 'window_start', 'window_end'].join(TAB) + NL + fit.rows.map(r =>
-        [r.nm, r.a, r.a * 24, r.b, r.r2, r.n, fmtDate(fit.xMin), fmtDate(fit.xMax)].join(TAB)).join(NL);
+      const rowsTxt = ['series', 'slope_per_hour', 'slope_per_day', 'value_at_window_start', 'R2', 'n', 'data_first', 'data_last', 'speed_class', 'window_start', 'window_end'].join(TAB) + NL + fit.rows.map(r =>
+        [(dispName(r.nm) !== r.nm ? dispName(r.nm) + ' (' + r.nm + ')' : r.nm), r.a, r.a * 24, r.b, r.r2, r.n, fmtDate(r.xFirst), fmtDate(r.xLast), (trendUnit === '°' ? speedClass(r.a) : ''), fmtDate(fit.xMin), fmtDate(fit.xMax)].join(TAB)).join(NL);
       const done = () => { const t = trendCopyBtn.textContent; trendCopyBtn.textContent = 'copied'; setTimeout(() => { trendCopyBtn.textContent = t; }, 1200); };
       try { navigator.clipboard.writeText(rowsTxt).then(done, () => {}); } catch(e){}
     };
