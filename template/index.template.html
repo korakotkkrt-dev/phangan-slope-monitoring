@@ -2612,6 +2612,17 @@ function trendUnitFor(spec){
   const m = /\(([^)]+)\)\s*$/.exec(lab);
   return m ? m[1] : '';
 }
+// spike gate for degree-valued tilt charts: sensor glitches (e.g. node 11 jumps of -12..-23 deg) sit far outside the zoomed
+// view but would drag a least-squares line. A sample is left out when it is further than max(2 deg, 10 robust sigma) from the window median.
+function spikeGate(ys, i0, i1, on){
+  if (!on) return null;
+  const step = Math.max(1, Math.floor((i1 - i0 + 1) / 4000)), a = [];
+  for (let i = i0; i <= i1; i += step){ const y = ys[i]; if (y != null && y === y) a.push(y); }
+  if (a.length < 20) return null;
+  a.sort((p, q) => p - q);
+  const med = a[a.length >> 1], dev = a.map(v => Math.abs(v - med)).sort((p, q) => p - q);
+  return { med, thr: Math.max(2, 10 * 1.4826 * dev[dev.length >> 1]) };
+}
 function fmtSlope(v){
   const a = Math.abs(v);
   if (a === 0) return '0';
@@ -2629,12 +2640,14 @@ function computeTrendFits(u, spec, colorOf){
     if (!s || s.show === false) return;
     const ys = u.data[k + 1];
     const flt = (thresholds.faultFilterEnabled && spec.primary.chOwner.FAULT) ? spec.primary.chOwner.FAULT[nm] : null;
-    let excl = 0;
+    let excl = 0, spk = 0;
+    const gate = spikeGate(ys, iStart, iEnd, trendUnitFor(spec) === '°');
     let n = 0, Sx = 0, Sy = 0, Sxx = 0, Sxy = 0, Syy = 0, xFirst = NaN, xLast = NaN;
     for (let i = iStart; i <= iEnd; i++){
       const y = ys[i];
       if (y == null || y !== y) continue;
       if (flt && flt[i]){ excl++; continue; }
+      if (gate && Math.abs(y - gate.med) > gate.thr){ spk++; continue; }
       const t = (xs[i] - xMin) / 3600;
       if (n === 0) xFirst = xs[i];
       xLast = xs[i];
@@ -2653,10 +2666,11 @@ function computeTrendFits(u, spec, colorOf){
     const cover = (xLast - xFirst) / Math.max(1, (xMax - xMin));
     if (cover < 0.6) warns.push('data covers only ' + Math.round(cover * 100) + '% of the window (gaps / fault spans)');
     if (r2 === r2 && r2 < 0.3) warns.push('weak linear fit (R\u00b2 low) \u2014 slope not representative');
-    rows.push({ nm, k, excl, color: colorOf ? colorOf(k) : (typeof s.stroke === 'string' ? s.stroke : '#888'), a, b, r2, n, xFirst, xLast, t0: xMin, spanH, warns });
+    if (spk) warns.push(spk.toLocaleString() + ' glitch samples (> ' + gate.thr.toFixed(1) + ' deg from the window median) left out');
+    rows.push({ nm, k, excl, spk, color: colorOf ? colorOf(k) : (typeof s.stroke === 'string' ? s.stroke : '#888'), a, b, r2, n, xFirst, xLast, t0: xMin, spanH, warns });
   });
   rows.sort((p, q) => Math.abs(q.a) - Math.abs(p.a));
-  return { xMin, xMax, rows, excl: rows.reduce((a, r) => a + r.excl, 0) };
+  return { xMin, xMax, rows, excl: rows.reduce((a, r) => a + r.excl, 0), spk: rows.reduce((a, r) => a + (r.spk || 0), 0) };
 }
 function renderTrendReadout(fit, unit){
   const un = unit || '';
@@ -2803,11 +2817,13 @@ function fitSeriesWindow(u, spec, nm, w1, w2){
   const xs = u.data[0], ys = u.data[k];
   const fault = (thresholds.faultFilterEnabled && spec.primary.chOwner.FAULT) ? spec.primary.chOwner.FAULT[nm] : null;
   const i0 = lowerBound(xs, w1, 0, xs.length), i1 = Math.min(lowerBound(xs, w2, 0, xs.length), xs.length - 1);
-  let n = 0, Sx = 0, Sy = 0, Sxx = 0, Sxy = 0, Syy = 0, xFirst = NaN, xLast = NaN, excl = 0;
+  const gate = spikeGate(ys, i0, i1, !!(spec.measurable && /^tilt \(/i.test((spec.primary && spec.primary.label) || '')));
+  let n = 0, Sx = 0, Sy = 0, Sxx = 0, Sxy = 0, Syy = 0, xFirst = NaN, xLast = NaN, excl = 0, spk = 0;
   for (let i = i0; i <= i1; i++){
     const y = ys[i];
     if (y == null || y !== y) continue;
     if (fault && fault[i]){ excl++; continue; }
+    if (gate && Math.abs(y - gate.med) > gate.thr){ spk++; continue; }
     const t = (xs[i] - w1) / 3600;
     if (n === 0) xFirst = xs[i];
     xLast = xs[i];
@@ -2819,7 +2835,7 @@ function fitSeriesWindow(u, spec, nm, w1, w2){
   const a = (n * Sxy - Sx * Sy) / dx, b = (Sy - a * Sx) / n;
   const dy = n * Syy - Sy * Sy;
   const r2 = dy > 0 ? Math.pow(n * Sxy - Sx * Sy, 2) / (dx * dy) : NaN;
-  return { nm, k, a, b, r2, n, excl, xFirst, xLast, t0: w1, w1, w2 };
+  return { nm, k, a, b, r2, n, excl, spk, xFirst, xLast, t0: w1, w1, w2 };
 }
 function valueNearX(u, k, x){
   const xs = u.data[0], ys = u.data[k];
@@ -2966,7 +2982,7 @@ function renderDrawLineList(chartId, listEl, onChange){
         fitNo++;
         body.innerHTML = '<span class="fit-tag" style="background:' + col + '">F' + fitNo + '</span> <b>' + escapeHtml(ln.nm) + '</b> — slope <b>' + fmtSlope(f.a) + ' ' + un + '/h</b> (' + fmtSlope(f.a * 24) + ' ' + un + '/day) · R² ' + (f.r2 === f.r2 ? f.r2.toFixed(3) : 'n/a') + ' · n ' + f.n.toLocaleString() +
           (warns.length ? ' <span class="tr-warn">⚠ ' + warns.join(', ') + '</span>' : '') +
-          '<br><span class="n">window ' + fmtDate(f.w1) + ' → ' + fmtDate(f.w2) + ' (' + (hrs < 48 ? hrs.toFixed(1) + ' h' : (hrs / 24).toFixed(1) + ' d') + ') · y = ' + fmtSlope(f.a) + '·t ' + (f.b >= 0 ? '+ ' : '− ') + Math.abs(f.b).toFixed(3) + ' (t in hours from window start)' + (f.excl ? ' · ' + f.excl + ' fault samples left out' : '') + '</span>';
+          '<br><span class="n">window ' + fmtDate(f.w1) + ' → ' + fmtDate(f.w2) + ' (' + (hrs < 48 ? hrs.toFixed(1) + ' h' : (hrs / 24).toFixed(1) + ' d') + ') · y = ' + fmtSlope(f.a) + '·t ' + (f.b >= 0 ? '+ ' : '− ') + Math.abs(f.b).toFixed(3) + ' (t in hours from window start)' + (f.excl ? ' · ' + f.excl + ' fault samples left out' : '') + (f.spk ? ' · ' + f.spk.toLocaleString() + ' glitch spikes left out' : '') + '</span>';
       } else {
         fitNo++;
         body.innerHTML = '<span class="fit-tag" style="background:' + col + '">F' + fitNo + '</span> <b>' + escapeHtml(ln.nm) + '</b> — <span class="n">not enough data in this window (series hidden, filtered out or missing)</span>';
