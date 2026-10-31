@@ -16,11 +16,14 @@ function init(){
   const app = document.getElementById('app');
   const pageData = el('div'); pageData.id = 'page-data';
   app.insertBefore(pageData, document.getElementById('charts'));
+  const hn = document.querySelector('header .note');
+  if (hn){ const d = el('details', 'rb-about'); d.appendChild(el('summary', null, 'About this data: stations, sensors, coverage')); hn.parentNode.insertBefore(d, hn); d.appendChild(hn); }
   const rb = el('div'); rb.id = 'rb';
   const top = el('div', 'rb-top');
   const tabsEl = el('div', 'rb-tabs');
   const msg = el('div', 'rb-msg', '');
-  top.append(tabsEl, msg);
+  const helpBtn = el('button', 'rb-help-btn', '? Help'); helpBtn.type = 'button'; helpBtn.title = 'a one-minute guide to this page';
+  top.append(tabsEl, msg, helpBtn);
   rb.appendChild(top);
   app.insertBefore(rb, app.firstChild);
 
@@ -35,7 +38,7 @@ function init(){
     const v = visibleCharts();
     return v.find(c => { const r = c.getBoundingClientRect(); return r.bottom > 140 && r.top < innerHeight; }) || v[0] || null;
   }
-  function chartLabel(){ const c = activeChart(); const h = c && c.querySelector('h3'); return h ? 'tools apply to: ' + h.textContent.slice(0, 48) : ''; }
+  function chartLabel(){ const c = activeChart(); const h = c && c.querySelector('h3'); const n = h && h.firstChild ? h.firstChild.textContent.trim() : ''; return n ? 'tools apply to: ' + n : ''; }
   function ensureCharts(){ if (dataOn || activePage === 'overview'){ dataOff(); activePage = 'readings'; applyPage(); } }
   function chartTool(text){
     ensureCharts();
@@ -51,10 +54,20 @@ function init(){
     const iv = setInterval(() => { if (find() || ++n > 40){ clearInterval(iv); go(); } }, 150);
   }
 
+  rb.addEventListener('click', e => { if (e.target.closest('button') && !e.target.closest('.rb-tab')) document.querySelectorAll('.cf-popover.show').forEach(p => p.classList.remove('show')); }, true);
   const bodies = {};
   function body(name){ const b = el('div', 'rb-body'); bodies[name] = b; rb.appendChild(b); return b; }
-  function grp(parent, label){ const g = el('div', 'rb-grp'); const r = el('div', 'rb-row'); g.append(r, el('div', 'rb-lbl', label)); parent.appendChild(g); return r; }
-  function btn(row, ico, label, fn, tip){ const b = el('button', 'rb-btn'); b.type = 'button'; b.append(el('span', 'rb-ico', ico), el('span', null, label)); if (tip) b.title = tip; b.onclick = fn; row.appendChild(b); return b; }
+  function grp(parent, label, when){ const g = el('div', 'rb-grp'); g.dataset.when = when || 'any'; const r = el('div', 'rb-row'); g.append(r, el('div', 'rb-lbl', label)); parent.appendChild(g); return r; }
+  function refreshGroups(){
+    rb.querySelectorAll('.rb-grp').forEach(g => {
+      const w = g.dataset.when, r = g.firstChild;
+      let show = true;
+      if (w === 'charts') show = !dataOn && activePage !== 'overview';
+      else if (w === 'nonempty') show = r.querySelector('button') !== null;
+      g.style.display = show ? '' : 'none';
+    });
+  }
+  function btn(row, ico, label, fn, tip){ const b = el('button', 'rb-btn'); b.type = 'button'; b.append(el('span', null, label)); if (tip) b.title = tip; b.onclick = fn; row.appendChild(b); return b; }
 
   const TABS = ['Home', 'Data', 'Clean', 'Analyze', 'Export'];
   let tab = 'Home';
@@ -63,60 +76,61 @@ function init(){
     if (G && t !== 'Data') G.colsPop.classList.remove('show');
     [...tabsEl.children].forEach(b => b.classList.toggle('on', b.dataset.t === t));
     Object.keys(bodies).forEach(k => bodies[k].classList.toggle('on', k === t));
+    refreshGroups();
     if (t === 'Data') dataOn || dataShow(); else if (dataOn && t !== 'Data' && t !== 'Export') { /* keep data page while browsing other ribbon tabs */ }
   }
-  TABS.forEach(t => { const b = el('button', 'rb-tab', t); b.type = 'button'; b.dataset.t = t; b.onclick = () => showTab(t); tabsEl.appendChild(b); });
+  const TAB_LABEL = { Clean: 'Fix data' };
+  TABS.forEach(t => { const b = el('button', 'rb-tab', TAB_LABEL[t] || t); b.type = 'button'; b.dataset.t = t; b.onclick = () => showTab(t); tabsEl.appendChild(b); });
 
   const homeB = body('Home'), datB = body('Data'), clnB = body('Clean'), anaB = body('Analyze'), expB = body('Export');
 
   const gPage = grp(homeB, 'Page');
   const pageButtons = {};
-  [['overview', 'O', 'Overview', 'live status tiles and the site map'], ['readings', 'R', 'Readings', 'raw charts per channel'], ['analysis', 'A', 'Analysis', 'rain envelope, tilt rate, compare']].forEach(([p, i, l, tip]) => {
-    pageButtons[p] = btn(gPage, i, l, () => { dataOff(); activePage = p; applyPage(); syncOn(); showTab('Home'); }, tip);
+  [['overview', 'Overview', 'status of every sensor right now'], ['readings', 'Readings', 'a chart of every channel over time'], ['analysis', 'Analysis', 'rain envelope, tilt rate and compare charts']].forEach(([p, l, tip]) => {
+    pageButtons[p] = btn(gPage, '', l, () => { dataOff(); activePage = p; applyPage(); syncOn(); showTab('Home'); }, tip);
   });
-  pageButtons.data = btn(gPage, '#', 'Data grid', () => { dataShow(); showTab('Data'); }, 'spreadsheet view of every channel');
+  pageButtons.data = btn(gPage, '', 'Data table', () => { dataShow(); showTab('Data'); }, 'every channel as a table you can sort, filter and copy to Excel');
 
   const gSt = grp(homeB, 'Station');
   stationBtns.forEach(b => gSt.appendChild(b));
-  const gShow = grp(homeB, 'Show / view');
+  const gShow = grp(homeB, 'Show', 'nonempty');
   gShow.append(readingsToggleWrap, categoryTabWrap);
-  const gTime = grp(homeB, 'Time range');
+  const gTime = grp(homeB, 'Time range', 'charts');
   gTime.append(back, btn6h, btn24h, home);
-  const gSet = grp(homeB, 'Page tools');
+  const gSet = grp(homeB, 'Settings');
   gSet.appendChild(settingsBtn);
-  [...navGroup.querySelectorAll('.sync-btn')].forEach(b => gSet.appendChild(b));
+  const syncBtns = [...navGroup.querySelectorAll('.sync-btn')];
+  syncBtns.filter(b => b.textContent.trim() === 'sync').forEach(b => gSet.appendChild(b));
 
   buildData(datB);
 
-  const gFilter = grp(clnB, 'Exclude bad data');
-  btn(gFilter, 'F', 'Filter', () => chartTool('filter'), 'hide sensor-fault points or values outside a range, on the chart you point at');
-  btn(gFilter, 'S', 'Show', () => chartTool('show'), 'show or hide channels on the chart you point at');
-  btn(gFilter, '!', 'Fault filter', () => { openSettingsModal(); }, 'settings: the automatic sensor-fault filter and warning thresholds');
-  const gAlign = grp(clnB, 'Align');
-  btn(gAlign, '~', 'Splice', () => chartTool('splice'), 'join a channel across a sensor swap or reinstall (visual what-if)');
-  const gNote = grp(clnB, 'Document');
-  [...document.querySelectorAll('.sync-btn')].forEach(b => { const t = b.textContent.trim(); if (t === 'notes' || t === 'rename') btn(gNote, t === 'notes' ? 'N' : 'T', t === 'notes' ? 'Field notes' : 'Rename', () => b.click(), b.title); });
-  const gUndo = grp(clnB, 'History');
-  btn(gUndo, '<', 'Undo zoom', () => back.click(), 'undo the last zoom (Backspace)');
+  const gFilter = grp(clnB, 'Hide bad readings');
+  btn(gFilter, '', 'Filter', () => chartTool('filter'), 'hide readings flagged as sensor faults, or values outside a min / max (point at a chart first)');
+  btn(gFilter, '', 'Channels', () => chartTool('show'), 'choose which channels are drawn on the chart you point at');
+  const gAlign = grp(clnB, 'Sensor swap');
+  btn(gAlign, '', 'Splice', () => chartTool('splice'), 'join a channel across a sensor swap or reinstall so the line continues (view only, the data is not changed)');
+  const gNote = grp(clnB, 'Notes and names');
+  syncBtns.filter(b => b.textContent.trim() !== 'sync').forEach(b => gNote.appendChild(b));
+  const gUndo = grp(clnB, 'Undo', 'charts');
+  btn(gUndo, '', 'Undo zoom', () => back.click(), 'go back one zoom step (Backspace)');
 
-  const gFit = grp(anaB, 'Fit');
-  btn(gFit, '/', 'Trendline', () => chartTool('trendline'), 'fit a straight line over the window you are looking at');
-  btn(gFit, '+', 'Draw & fit', () => chartTool('draw'), 'click two points: fit the nearest series');
-  btn(gFit, 'K', 'Measure rate', () => chartTool('measure'), 'rate of change over the zoomed window');
+  const gFit = grp(anaB, 'Fit a line');
+  btn(gFit, '', 'Trendline', () => chartTool('trendline'), 'straight line through the window you are looking at (zoom first)');
+  btn(gFit, '', 'Draw & fit', () => chartTool('draw'), 'click two points on the chart; the nearest series is fitted');
+  btn(gFit, '', 'Measure rate', () => chartTool('measure'), 'rate of change in degrees per hour over the zoomed window');
   const gCh = grp(anaB, 'Chart');
-  btn(gCh, '^', 'Taller', () => chartTool('size'), 'cycle the chart height');
-  anaB.appendChild(Object.assign(el('div', 'rb-note'), { textContent: 'These tools work on the chart under your mouse. Drag on a chart to zoom time, shift-drag to pan, double-click an axis to type a range.' }));
+  btn(gCh, '', 'Chart height', () => chartTool('size'), 'make the chart under the mouse taller or shorter');
 
   const gShare = grp(expB, 'Chart');
-  btn(gShare, 'P', 'PNG image', () => chartTool('png'), 'save the chart you point at as an image');
-  const gTbl = grp(expB, 'Data grid');
-  btn(gTbl, 'C', 'Copy selection', () => { dataShow(); showTab('Export'); G.copy(); }, 'copy the selected cells as a table for Excel');
-  btn(gTbl, 'X', 'Export CSV', () => { dataShow(); showTab('Export'); G.csv(); }, 'download the grid rows as CSV');
+  btn(gShare, '', 'Save as image', () => chartTool('png'), 'save the chart you point at as a PNG');
+  const gTbl = grp(expB, 'Data table');
+  btn(gTbl, '', 'Copy cells', () => { dataShow(); showTab('Export'); G.copy(); }, 'copy the selected cells so you can paste them into Excel');
+  btn(gTbl, '', 'Download CSV', () => { dataShow(); showTab('Export'); G.csv(); }, 'download the rows shown in the data table');
 
   function syncOn(){ Object.keys(pageButtons).forEach(p => pageButtons[p].classList.toggle('on', p === 'data' ? dataOn : (!dataOn && p === activePage))); }
 
   const _ap = applyPage;
-  applyPage = function(){ if (dataOn) dataOff(); _ap(); syncOn(); };
+  applyPage = function(){ if (dataOn) dataOff(); _ap(); syncOn(); refreshGroups(); };
   const _as = applyStation;
   applyStation = function(){ _as(); if (dataOn) G.rebuild(); };
 
@@ -124,14 +138,15 @@ function init(){
     dataOn = true;
     ['page-overview', 'hint-overview', 'hint-readings', 'hint-analysis', 'charts'].forEach(id => { const e = document.getElementById(id); if (e) e.dataset.hiddenByGrid = e.style.display || '_', e.style.display = 'none'; });
     pageData.style.display = 'block';
-    G.rebuild(); syncOn();
-    msg.textContent = 'data grid - click a cell, shift-click to extend, Ctrl+C to copy';
+    G.rebuild(); syncOn(); refreshGroups();
+    msg.textContent = 'click a cell, shift-click to extend, Ctrl+C to copy';
   }
   function dataOff(){
     if (!dataOn) return;
     dataOn = false;
     if (G) G.colsPop.classList.remove('show');
     pageData.style.display = 'none';
+    refreshGroups();
     ['page-overview', 'hint-overview', 'hint-readings', 'hint-analysis', 'charts'].forEach(id => { const e = document.getElementById(id); if (e) e.style.display = ''; });
     syncOn();
   }
@@ -145,21 +160,20 @@ function init(){
     const RES = [['1 min', 60], ['10 min', 600], ['1 hour', 3600], ['6 hours', 21600], ['1 day', 86400]];
     const RNG = [['last 24 h', 1], ['last 3 days', 3], ['last 7 days', 7], ['last 30 days', 30], ['all data', 0]];
 
-    const gView = grp(dat, 'Resolution and range');
+    const gView = grp(dat, 'Rows');
     const c1 = el('label', 'rb-ctl', 'every '); const sRes = el('select'); RES.forEach(r => sRes.add(new Option(r[0], r[1]))); sRes.value = 3600; c1.appendChild(sRes);
     const c2 = el('label', 'rb-ctl', 'show '); const sRng = el('select'); RNG.forEach(r => sRng.add(new Option(r[0], r[1]))); sRng.value = 7; c2.appendChild(sRng);
     gView.append(c1, c2);
     sRes.onchange = () => { S.res = +sRes.value; rebuild(); };
     sRng.onchange = () => { S.days = +sRng.value; rebuild(); };
     const gCols = grp(dat, 'Columns');
-    const bCols = btn(gCols, '|||', 'Pick columns', () => togglePop(bCols), 'choose which channels are columns'); bCols.dataset.colsbtn = '1';
-    const gRows = grp(dat, 'Rows');
-    const bFilt = btn(gRows, 'V', 'Filter rows', () => { S.filt = !S.filt; bFilt.classList.toggle('on', S.filt); draw(true); }, 'show a min / max box under each column heading');
-    btn(gRows, 'A', 'Clear sort', () => { S.sortC = null; makeView(); draw(true); }, 'back to time order');
-    const gClip = grp(dat, 'Clipboard and file');
-    btn(gClip, 'C', 'Copy', () => copy(), 'copy the selected cells (tab separated, paste into Excel). Ctrl+C also works');
-    btn(gClip, 'X', 'CSV', () => csv(), 'download the rows shown as a CSV file');
-    dat.appendChild(Object.assign(el('div', 'rb-note'), { textContent: 'The grid shows the record as received (before splice or filters). Values are averages per time step; rain_mm is the rainfall integrated from rainfall_rate.' }));
+    const bCols = btn(gCols, '', 'Pick columns', () => togglePop(bCols), 'choose which channels are columns'); bCols.dataset.colsbtn = '1';
+    const gRows = grp(dat, 'Sort and filter');
+    const bFilt = btn(gRows, '', 'Filter rows', () => { S.filt = !S.filt; bFilt.classList.toggle('on', S.filt); draw(true); }, 'show a min / max box under each column heading');
+    btn(gRows, '', 'Clear sort', () => { S.sortC = null; makeView(); draw(true); }, 'back to time order');
+    const gClip = grp(dat, 'Take it out');
+    btn(gClip, '', 'Copy', () => copy(), 'copy the selected cells (tab separated, paste into Excel). Ctrl+C also works');
+    btn(gClip, '', 'CSV', () => csv(), 'download the rows shown as a CSV file');
 
     const wrap = el('div', 'gd-wrap');
     const scroll = el('div', 'gd-scroll'); scroll.tabIndex = 0;
@@ -315,6 +329,29 @@ function init(){
     new ResizeObserver(() => { if (dataOn) draw(false); }).observe(scroll);
     G = { rebuild: rebuild, copy: copy, csv: csv, colsPop: pop };
   }
+
+  const helpEl = el('div'); helpEl.id = 'rb-help';
+  const hbox = el('div', 'rb-help-box');
+  hbox.innerHTML = '<h3>Quick start</h3><ol>'
+    + '<li><b>See how things are right now</b>: Home, then <i>Overview</i>. Each tile is a live reading; the colored edge is its risk level (green normal, amber watch, red critical).</li>'
+    + '<li><b>Look at a sensor over time</b>: Home, then <i>Readings</i>. Drag on a chart to zoom the time, <i>last 24h</i> jumps to recent data, <i>Undo zoom</i> or Backspace goes back.</li>'
+    + '<li><b>Get the numbers into Excel</b>: <i>Data</i> tab. Pick the time step and columns, click a cell and shift-click another, then <i>Copy</i> and paste into Excel.</li>'
+    + '<li><b>Hide readings you do not trust</b>: <i>Fix data</i> tab, point at a chart, then <i>Filter</i>. The raw data is never changed.</li>'
+    + '<li><b>Write down a visit or sensor swap</b>: <i>Fix data</i> tab, then <i>notes</i>.</li>'
+    + '</ol><p class="rb-help-tip">Tools in <i>Fix data</i> and <i>Analyze</i> act on the chart under your mouse. The line at the top right says which one.</p>';
+  const full = el('details'); full.appendChild(el('summary', null, 'Full reference of the old page hints'));
+  ['hint-overview', 'hint-readings', 'hint-analysis'].forEach(id => { const h = document.getElementById(id); if (h){ const c = h.cloneNode(true); c.removeAttribute('id'); c.style.display = 'block'; c.className = 'rb-help-ref'; full.appendChild(c); } });
+  const close = el('button', null, 'Close'); close.type = 'button'; close.onclick = () => helpEl.classList.remove('show');
+  hbox.append(full, close); helpEl.appendChild(hbox); document.body.appendChild(helpEl);
+  helpBtn.onclick = () => helpEl.classList.toggle('show');
+  helpEl.addEventListener('click', e => { if (e.target === helpEl) helpEl.classList.remove('show'); });
+  document.addEventListener('keydown', e => { if (e.key === 'Escape') helpEl.classList.remove('show'); });
+
+  const foldable = n => n.parentElement && n.parentElement.classList.contains('chart') && !/measure-readout|trend-readout|envelope-caption/.test(n.className) && n.textContent.length > 140;
+  function foldNotes(){ document.querySelectorAll('#charts .chart > .note').forEach(n => { if (!n.dataset.rbf && foldable(n)){ n.dataset.rbf = '1'; n.classList.add('rb-fold'); } }); }
+  new MutationObserver(foldNotes).observe(document.getElementById('charts'), { childList: true, subtree: true });
+  document.getElementById('charts').addEventListener('click', e => { const n = e.target.closest('.rb-fold'); if (n) n.classList.toggle('rb-open'); });
+  foldNotes();
 
   showTab('Home');
   syncOn();
