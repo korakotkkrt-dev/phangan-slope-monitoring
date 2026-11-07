@@ -57,26 +57,27 @@ function findFrozen(k, xs, cols) {
   });
   return out;
 }
-function cleanTilt(k, S) {
+function cleanTilt(k, S, flags, exclude) {
+  const F = Object.assign({ limit45: true, allzero: true, analog: true, frozen: true }, flags || {});
   const xs = S.xs, n = xs.length, cols = {};
   const need = new Set(); Object.keys(BOXES[k] || {}).forEach(bx => BOXES[k][bx].forEach(c => need.add(c)));
   Object.keys(S.CH).filter(c => /^tilt_\d+(_[xy])?$/.test(c) || need.has(c)).forEach(c => { cols[c] = Float64Array.from(S.CH[c]); });
   const fv = FIRST_VALID[k];
   if (fv) { const e = upperBound(xs, epochOfLocal(fv)); Object.keys(cols).filter(c => /^(tilt|soil)/.test(c)).forEach(c => { for (let i = 0; i < e; i++) cols[c][i] = NaN; }); }
-  const frozen = findFrozen(k, xs, cols);
+  const frozen = F.frozen ? findFrozen(k, xs, cols) : [];
   frozen.forEach(f => f.chans.forEach(c => { for (let i = f.a; i <= f.b; i++) cols[c][i] = NaN; }));
   const tc = Object.keys(cols).filter(c => /^tilt_\d+(_[xy])?$/.test(c)).sort(cmpTilt);
-  const t = {}; tc.forEach(c => { const a = new Float64Array(n); for (let i = 0; i < n; i++) { const v = cols[c][i]; a[i] = Math.abs(v) < TILT_MAX ? v : NaN; } t[c] = a; });
+  const t = {}; tc.forEach(c => { const a = new Float64Array(n); for (let i = 0; i < n; i++) { const v = cols[c][i]; a[i] = Math.abs(v) < (F.limit45 ? TILT_MAX : 1e6) ? v : NaN; } t[c] = a; });
   let nAllZero = 0;
   for (let i = 0; i < n; i++) {
     let z = 0; for (const c of tc) if (Math.abs(cols[c][i]) < ZERO_EPS) z++;
-    if (z >= ALLZERO_FRAC * tc.length) { nAllZero++; for (const c of tc) t[c][i] = NaN; }
+    if (F.allzero && z >= ALLZERO_FRAC * tc.length) { nAllZero++; for (const c of tc) t[c][i] = NaN; }
   }
-  (ANALOG_CUT[k] || []).forEach(([a, b, cs]) => { const i0 = lowerBound(xs, epochOfLocal(a)), i1 = upperBound(xs, epochOfLocal(b)); cs.forEach(c => { if (t[c]) for (let i = i0; i < i1; i++) t[c][i] = NaN; }); });
+  if (F.analog) (ANALOG_CUT[k] || []).forEach(([a, b, cs]) => { const i0 = lowerBound(xs, epochOfLocal(a)), i1 = upperBound(xs, epochOfLocal(b)); cs.forEach(c => { if (t[c]) for (let i = i0; i < i1; i++) t[c][i] = NaN; }); });
   // analog (one underscore) channels: drop minutes further than ANALOG_TOL from BOTH night-time levels of their day
   const day = new Int32Array(n), hr = new Int8Array(n);
   for (let i = 0; i < n; i++) { const l = xs[i] + 25200; day[i] = Math.floor(l / 86400); hr[i] = Math.floor((l % 86400) / 3600); }
-  tc.filter(c => c.split('_').length === 2).forEach(c => {
+  if (F.analog) tc.filter(c => c.split('_').length === 2).forEach(c => {
     const v = t[c], g = [new Map(), new Map()];
     for (let i = 0; i < n; i++) { if (v[i] !== v[i]) continue; const m = hr[i] < 6 ? 0 : hr[i] >= 18 ? 1 : -1; if (m < 0) continue; (g[m].get(day[i]) || g[m].set(day[i], []).get(day[i])).push(v[i]); }
     const ref = g.map(mp => { const r = new Map(); mp.forEach((a, d) => { if (a.length >= ANALOG_NIGHT_MIN) r.set(d, median(a)); }); return r; });
@@ -89,6 +90,7 @@ function cleanTilt(k, S) {
     }
     drop.forEach(i => { v[i] = NaN; });
   });
+  (exclude || []).forEach(r => { const i0 = lowerBound(xs, r.from), i1 = upperBound(xs, r.to); (r.ch ? [r.ch] : tc).forEach(c => { if (t[c]) for (let i = i0; i < i1; i++) t[c][i] = NaN; }); });
   return { tc, t, frozen, nAllZero };
 }
 
@@ -218,10 +220,11 @@ function episodes(ch, sr, ok, bdDay, d0, rows) {            // sr: corrected dai
 }
 
 // ---------------------------------------------------------------- whole analysis
-function analyze(stations) {
-  const bdDay = dayOfStr(BASE_DATE), pre = {}, out = {};
+function analyze(stations, opts) {
+  opts = opts || {};
+  const bdDay = dayOfStr(BASE_DATE), pre = {}, out = {}, skip = new Set(opts.skip || []);
   Object.keys(stations).forEach(k => {
-    const c = cleanTilt(k, stations[k]), fr = dailyFrames(stations[k].xs, c.tc, c.t), from = bdDay - fr.d0, mc = movedCount(fr, c.tc, from);
+    const c = cleanTilt(k, stations[k], opts.clean, (opts.exclude || {})[k]), fr = dailyFrames(stations[k].xs, c.tc, c.t), from = bdDay - fr.d0, mc = movedCount(fr, c.tc, from);
     const cd = new Set(); for (let d = from; d < fr.nd; d++) if (mc.n[d] >= STEP_COMMON_N) cd.add(d + fr.d0);
     pre[k] = { c, fr, from, mc, cd };
   });
@@ -254,19 +257,30 @@ function analyze(stations) {
         }
       });
     }
+    (opts.add || []).filter(a => a.st === k).forEach(a => {
+      const vd = dayOfStr(a.date), i = vd - fr.d0; if (!(i >= from && i < fr.nd)) return;
+      (a.ch ? [a.ch] : tc).forEach(ch => {
+        if (steps.some(s => s.d === vd && s.ch === ch)) return;
+        const pv = prevVal(ch, i); let v = a.v;
+        if (v == null || !(v === v)) v = (mean[ch][i] === mean[ch][i] && pv === pv) ? mean[ch][i] - pv : NaN;
+        if (v === v) steps.push({ d: vd, ch, v, kind: 'manual' });
+      });
+    });
+    for (let q = steps.length - 1; q >= 0; q--) if (skip.has(k + '|' + dayLabel(steps[q].d) + '|' + steps[q].ch)) steps.splice(q, 1);
     const base = {}; tc.forEach(ch => { let s = 0, n = 0; for (let d = from; d < from + BASE_NDAYS; d++) if (mean[ch][d] === mean[ch][d]) { s += mean[ch][d]; n++; } base[ch] = n ? s / n : NaN; });
     const corr = {}; tc.forEach(ch => {
       const a = new Float64Array(fr.nd).fill(NaN);
       for (let d = from; d < fr.nd; d++) { let off = 0; steps.forEach(s => { if (s.ch === ch && s.d - fr.d0 <= d) off += s.v; }); a[d] = mean[ch][d] - base[ch] - off; }
       corr[ch] = a;
     });
+    const rawc = {}; tc.forEach(ch => { const a = new Float64Array(fr.nd).fill(NaN); for (let d = from; d < fr.nd; d++) a[d] = mean[ch][d] - base[ch]; rawc[ch] = a; });
     const phases = [], lines = [];
     tc.forEach(ch => {
       const stepDays = new Set(steps.filter(s => s.ch === ch).map(s => s.d));
       const ok = d => d >= bdDay && corr[ch][d - fr.d0] === corr[ch][d - fr.d0] && fr.cnt[ch][d - fr.d0] >= MIN_MIN_VALID && !stepDays.has(d);
       episodes(ch, corr[ch], ok, bdDay, fr.d0, null).forEach(p => phases.push(p));
     });
-    out[k] = { tc, d0: fr.d0, nd: fr.nd, bdDay, dm: fr.med, dmean: fr.mean, cnt: fr.cnt, corr, base, steps, phases, frozen: pre[k].c.frozen, nAllZero: pre[k].c.nAllZero };
+    out[k] = { tc, d0: fr.d0, nd: fr.nd, bdDay, dm: fr.med, dmean: fr.mean, cnt: fr.cnt, corr, raw: rawc, base, steps, phases, frozen: pre[k].c.frozen, nAllZero: pre[k].c.nAllZero };
   });
   return out;
 }

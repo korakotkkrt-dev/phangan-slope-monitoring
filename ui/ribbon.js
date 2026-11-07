@@ -40,13 +40,21 @@ function init(){
   }
   function chartLabel(){ const c = activeChart(); const h = c && c.querySelector('h3'); const n = h && h.firstChild ? h.firstChild.textContent.trim() : ''; return n ? 'tools apply to: ' + n : ''; }
   function ensureCharts(){ if (dataOn || activePage === 'overview'){ dataOff(); activePage = 'readings'; applyPage(); } }
+  // filter / splice only exist on the tilt chart (the rain chart has neither), so they go there instead of "the first chart on the page"
+  function toolChart(text){
+    if (/^(filter|splice)/.test(text)){
+      const w = document.getElementById('chart-' + activeStation + '-pair-tilt');
+      if (w && w.offsetParent !== null){ if (w._build && w.classList.contains('chart-placeholder')){ try { w._build(); } catch(e){} } return document.getElementById('chart-' + activeStation + '-pair-tilt') || w; }
+    }
+    return activeChart();
+  }
   function chartTool(text){
     ensureCharts();
     if (!activeChart()) return say('open a chart page first', 'bad');
-    const find = () => { const w = activeChart(); return w && [...w.querySelectorAll('button')].find(x => x.textContent.trim().toLowerCase().indexOf(text) === 0); };
+    const find = () => { const w = toolChart(text); return w && [...w.querySelectorAll('button')].find(x => x.textContent.trim().toLowerCase().indexOf(text) === 0); };
     const go = () => { const b = find(); if (!b) return say('this chart has no "' + text + '" tool - point at another chart', 'bad'); b.click(); };
     if (find()) return go();
-    const w0 = activeChart();
+    const w0 = toolChart(text) || activeChart();
     if (w0.querySelector('.chart-tool-btn') && !/trendline|draw|measure/.test(text)) return go();
     w0.scrollIntoView({ block: 'center' });
     say('building the chart...', 'ok');
@@ -105,7 +113,7 @@ function init(){
   buildData(datB);
 
   const gFilter = grp(clnB, 'Hide bad readings');
-  btn(gFilter, '', 'Filter', () => chartTool('filter'), 'hide readings flagged as sensor faults, or values outside a min / max (point at a chart first)');
+  btn(gFilter, '', 'Filter', () => chartTool('filter'), 'hide readings flagged as sensor faults, or values outside a min / max - opens on the tilt chart of the selected station');
   btn(gFilter, '', 'Channels', () => chartTool('show'), 'choose which channels are drawn on the chart you point at');
   const gAlign = grp(clnB, 'Sensor swap');
   btn(gAlign, '', 'Shift / Splice', () => chartTool('splice'), 'shift a channel at a step (sensor swap, reinstall, visit) so the line continues; the original data stays visible as a faint dashed line. Offers the sudden steps it finds on the raw samples (view only, the data is not changed)');
@@ -128,7 +136,7 @@ function init(){
   btn(gFit, '', 'Draw & fit', () => chartTool('draw'), 'click two points on the chart; the nearest series is fitted');
   btn(gFit, '', 'Measure rate', () => chartTool('measure'), 'rate of change in degrees per hour over the zoomed window');
   const gSlide = grp(anaB, 'Slide method');
-  btn(gSlide, '', 'Auto trend lines', () => { if (window.PSWTrendsUI) PSWTrendsUI.open(); }, 'step-corrected daily tilt with piecewise trend lines, speed classes and a table - the same analysis as the slides');
+  btn(gSlide, '', 'Auto trend lines', () => { if (window.PSWTrendsUI) PSWTrendsUI.open(); }, 'step-corrected daily tilt with trend lines for every stretch, speed classes, a table, and its own Filter and Shift - the same analysis as the slides');
   const gRel = grp(anaB, 'Tilt view');
   const rl = el('label', 'rb-ctl'); const rcb = document.createElement('input'); rcb.type = 'checkbox'; rcb.checked = !!REL_MODE;
   rl.title = 'show every tilt channel the way the slides do: minus its own baseline (mean of the first 3 days from 27 Jun) and with the visit / reset / fault steps removed, so small movements are visible without rescaling. Do not also splice the same steps by hand';
