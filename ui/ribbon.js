@@ -108,7 +108,16 @@ function init(){
   btn(gFilter, '', 'Filter', () => chartTool('filter'), 'hide readings flagged as sensor faults, or values outside a min / max (point at a chart first)');
   btn(gFilter, '', 'Channels', () => chartTool('show'), 'choose which channels are drawn on the chart you point at');
   const gAlign = grp(clnB, 'Sensor swap');
-  btn(gAlign, '', 'Splice', () => chartTool('splice'), 'join a channel across a sensor swap or reinstall so the line continues (view only, the data is not changed)');
+  btn(gAlign, '', 'Shift / Splice', () => chartTool('splice'), 'shift a channel at a step (sensor swap, reinstall, visit) so the line continues; the original data stays visible as a faint dashed line. Offers the sudden steps it finds on the raw samples (view only, the data is not changed)');
+  const gGap = grp(clnB, 'Missing data');
+  const gl1 = el('label', 'rb-ctl'); const gcb = document.createElement('input'); gcb.type = 'checkbox'; gcb.checked = !!gapCfg.on;
+  gl1.append(gcb, document.createTextNode(' red hatched band where there is no data'));
+  const gl2 = el('label', 'rb-ctl', 'gap of at least '); const gsel = el('select');
+  [10, 30, 60, 120, 360].forEach(m => gsel.add(new Option(m < 60 ? m + ' min' : (m / 60) + ' h', m))); gsel.value = gapCfg.minMin; gl2.appendChild(gsel);
+  const gapRedraw = () => { saveGapCfg(); charts.forEach(c => { try { c.u.redraw(); } catch(e){} }); };
+  gcb.onchange = () => { gapCfg.on = gcb.checked; gapRedraw(); };
+  gsel.onchange = () => { gapCfg.minMin = +gsel.value; gapRedraw(); };
+  gGap.append(gl1, gl2);
   const gNote = grp(clnB, 'Notes and names');
   syncBtns.filter(b => b.textContent.trim() !== 'sync').forEach(b => gNote.appendChild(b));
   const gUndo = grp(clnB, 'Undo', 'charts');
@@ -118,6 +127,8 @@ function init(){
   btn(gFit, '', 'Trendline', () => chartTool('trendline'), 'straight line through the window you are looking at (zoom first)');
   btn(gFit, '', 'Draw & fit', () => chartTool('draw'), 'click two points on the chart; the nearest series is fitted');
   btn(gFit, '', 'Measure rate', () => chartTool('measure'), 'rate of change in degrees per hour over the zoomed window');
+  const gSlide = grp(anaB, 'Slide method');
+  btn(gSlide, '', 'Auto trend lines', () => { if (window.PSWTrendsUI) PSWTrendsUI.open(); }, 'step-corrected daily tilt with piecewise trend lines, speed classes and a table - the same analysis as the slides');
   const gCh = grp(anaB, 'Chart');
   btn(gCh, '', 'Chart height', () => chartTool('size'), 'make the chart under the mouse taller or shorter');
 

@@ -73,6 +73,85 @@ header .rb-about .note{margin-top:6px}
 @media (min-width:701px){.rb-body{flex-wrap:wrap;overflow-x:visible;row-gap:6px}.rb-grp{padding-bottom:2px}}
 
 /*RIBBON-CSS:END*/
+/*HOME-CSS:START*/
+/* Station-map landing page (home). The dashboard (#app) stays laid out at full width while hidden, so charts keep their size. */
+body.home-on #app{visibility:hidden;height:0;overflow:hidden;margin:0;padding:0}
+body:not(.home-on) #home{display:none}
+#home{margin:0 0 18px}
+.hm-head{display:flex;flex-wrap:wrap;align-items:baseline;gap:6px 14px;margin:0 0 10px}
+.hm-head h2{margin:0;font:600 17px "IBM Plex Sans",sans-serif;color:var(--ink)}
+.hm-head .hm-sub{font:12.5px "IBM Plex Sans",sans-serif;color:var(--ink-3)}
+.hm-grid{display:grid;grid-template-columns:minmax(0,1fr) 340px;gap:12px;align-items:start}
+@media (max-width:900px){.hm-grid{grid-template-columns:minmax(0,1fr)}}
+.hm-card{background:var(--panel);border:1px solid var(--line);border-radius:8px;box-shadow:var(--shadow);min-width:0}
+#hm-map{height:min(68vh,640px);min-height:380px;border-radius:8px;background:var(--panel-2)}
+.hm-mapwrap{padding:6px}
+.hm-fallback{display:none;padding:18px;font:13px "IBM Plex Sans",sans-serif;color:var(--ink-3)}
+.hm-list{display:flex;flex-direction:column}
+.hm-list h3{margin:0;padding:10px 12px 6px;font:600 11px "IBM Plex Mono",monospace;letter-spacing:.06em;text-transform:uppercase;color:var(--ink-3)}
+.hm-st{display:block;width:100%;text-align:left;border:0;border-top:1px solid var(--line-soft);background:transparent;padding:10px 12px;cursor:pointer;color:var(--ink);font:inherit}
+.hm-st:hover,.hm-st:focus-visible{background:var(--panel-2);outline:none}
+.hm-st b{display:block;font:600 14px "IBM Plex Sans",sans-serif}
+.hm-st small{display:block;color:var(--ink-3);font:12px "IBM Plex Sans",sans-serif}
+.hm-row{display:flex;align-items:center;justify-content:space-between;gap:8px}
+.hm-chip{display:inline-flex;align-items:center;gap:5px;border-radius:999px;padding:1px 10px;font:600 11.5px "IBM Plex Sans",sans-serif;border:1px solid transparent;white-space:nowrap}
+.hm-chip.ok{background:var(--ok-bg);color:var(--ok);border-color:var(--ok)}
+.hm-chip.warn{background:var(--warn-bg);color:var(--warn);border-color:var(--warn)}
+.hm-chip.crit{background:var(--crit-bg);color:var(--crit);border-color:var(--crit)}
+.hm-chip.stale{background:var(--panel-2);color:var(--ink-3);border-color:var(--line)}
+.hm-tiles{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin:8px 0}
+.hm-t{background:var(--panel-2);border:1px solid var(--line-soft);border-radius:6px;padding:5px 8px}
+.hm-t span{display:block;font:11px "IBM Plex Sans",sans-serif;color:var(--ink-3)}
+.hm-t b{font:600 15px "IBM Plex Mono",monospace;color:var(--ink)}
+.hm-t em{font:11px "IBM Plex Mono",monospace;color:var(--ink-3);font-style:normal;margin-left:3px}
+.hm-open{display:block;width:100%;margin-top:6px;padding:7px 10px;border-radius:6px;border:1px solid var(--accent);background:var(--accent-bg,rgba(31,94,78,.12));color:var(--accent);font:600 13px "IBM Plex Sans",sans-serif;cursor:pointer}
+.hm-open:hover{background:var(--accent);color:var(--panel)}
+.hm-note{padding:8px 12px 10px;border-top:1px solid var(--line-soft);font:11.5px/1.45 "IBM Plex Sans",sans-serif;color:var(--ink-3)}
+.hm-mk{width:28px;height:28px;border-radius:50%;border:3px solid #fff;box-shadow:0 0 0 2px rgba(0,0,0,.4);display:grid;place-items:center;color:#fff;font:700 12px "IBM Plex Mono",monospace}
+.hm-mk.ok{background:#1F5E4E}.hm-mk.warn{background:#C99A1B}.hm-mk.crit{background:#B23A2A}.hm-mk.stale{background:#6B7686}
+.hm-pop{min-width:230px;font-family:"IBM Plex Sans",sans-serif}
+.hm-pop h4{margin:0;font:600 15px "IBM Plex Sans",sans-serif}
+.hm-pop .hm-loc{font-size:12px;color:#5F7384;margin:1px 0 6px}
+.home-back{border:1px solid var(--line);background:var(--panel);color:var(--ink);border-radius:6px;padding:4px 10px;font:600 12px "IBM Plex Sans",sans-serif;cursor:pointer;margin:0 8px 4px 0}
+.home-back:hover{border-color:var(--accent);color:var(--accent)}
+.hm-hdrback{margin:6px 0 0}
+body.home-on header .note,body.home-on header .rb-about{display:none}
+.leaflet-popup-content-wrapper,.leaflet-popup-tip{background:var(--panel);color:var(--ink)}
+.leaflet-container a.leaflet-popup-close-button{color:var(--ink-3)}
+.leaflet-popup-content{margin:12px 14px}
+
+/*HOME-CSS:END*/
+/*TRENDS-CSS:START*/
+body.tr-open{overflow:hidden}
+.tr-ov{position:fixed;inset:0;z-index:200;background:rgba(10,20,25,.5);overflow:auto;padding:18px max(12px,env(safe-area-inset-left,0px)) 18px}
+.tr-ov[hidden]{display:none}
+.tr-panel{max-width:1180px;margin:0 auto;background:var(--panel);color:var(--ink);border:1px solid var(--line);border-radius:10px;box-shadow:0 10px 40px rgba(0,0,0,.35);padding:12px 16px 16px}
+.tr-head{display:flex;align-items:center;justify-content:space-between;gap:10px}
+.tr-head h2{margin:0;font:600 16px "IBM Plex Sans",sans-serif}
+.tr-x{border:1px solid var(--line);background:var(--panel-2);color:var(--ink);border-radius:6px;width:32px;height:32px;font-size:18px;cursor:pointer}
+.tr-ctl{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin:10px 0}
+.tr-b{border:1px solid var(--line);background:var(--panel-2);color:var(--ink);border-radius:6px;padding:4px 12px;font:600 12.5px "IBM Plex Sans",sans-serif;cursor:pointer}
+.tr-b.on{border-color:var(--accent);color:var(--accent);background:var(--accent-bg,rgba(31,94,78,.12))}
+.tr-ctl select{font:12.5px "IBM Plex Mono",monospace;background:var(--panel);color:var(--ink);border:1px solid var(--line);border-radius:5px;padding:4px 8px}
+.tr-info{font:11.5px "IBM Plex Mono",monospace;color:var(--ink-3)}
+.tr-chart{border:1px solid var(--line-soft);border-radius:8px;padding:6px;background:var(--panel);overflow:hidden}
+.tr-leg{display:flex;flex-wrap:wrap;gap:6px 16px;margin:8px 0;font:12px "IBM Plex Sans",sans-serif;color:var(--ink-2)}
+.tr-leg span{display:inline-flex;align-items:center;gap:6px}.tr-leg i{width:18px;height:6px;border-radius:3px;display:inline-block}
+.tr-leg i.tr-step{height:12px;width:0;border-left:2px dashed #B23A2A;border-radius:0}.tr-leg i.tr-set{height:12px;width:14px;background:rgba(120,130,140,.35);border-radius:2px}
+.tr-leg i.tr-gap{height:12px;width:14px;background:repeating-linear-gradient(45deg,rgba(178,58,42,.7) 0 2px,transparent 2px 5px);border-radius:2px}
+.tr-grid{display:grid;grid-template-columns:minmax(0,1.5fr) minmax(0,1fr);gap:14px}
+@media (max-width:900px){.tr-grid{grid-template-columns:minmax(0,1fr)}}
+.tr-grid h3{margin:6px 0;font:600 11px "IBM Plex Mono",monospace;letter-spacing:.06em;text-transform:uppercase;color:var(--ink-3)}
+.tr-tw{overflow:auto;max-height:340px;border:1px solid var(--line-soft);border-radius:8px}
+.tr-tw table{border-collapse:collapse;width:100%;font:12px "IBM Plex Sans",sans-serif}
+.tr-tw th,.tr-tw td{padding:4px 8px;text-align:left;border-top:1px solid var(--line-soft);white-space:nowrap}
+.tr-tw th{position:sticky;top:0;background:var(--panel-2);font:600 10.5px "IBM Plex Mono",monospace;color:var(--ink-3);border-top:0}
+.tr-row{cursor:pointer}.tr-row:hover,.tr-row.on{background:var(--accent-bg,rgba(31,94,78,.12))}
+.tr-sep td{background:var(--panel-2);font-weight:600;color:var(--ink-2)}
+.tr-pill{display:inline-block;color:#fff;border-radius:999px;padding:0 9px;font-size:11.5px}
+.tr-note{margin-top:10px;font:12px/1.5 "IBM Plex Sans",sans-serif;color:var(--ink-2)}.tr-note summary{cursor:pointer;font-weight:600}
+
+/*TRENDS-CSS:END*/
 </style></head><body>
 <meta charset="utf-8">
 <title>Phangan Slope Monitoring</title>
@@ -1344,11 +1423,13 @@ function riskLevel(value, spec){
   return 'ok';
 }
 function tiltRisk(st, name, value){
+  if (DECK_MODE){ const d = deckTilt(st, name); return d ? d.risk : 'ok'; }
   if (thresholds.activeModel === 'model1') return riskLevel(value, thresholds.model1.tilt);
   const { rockNames } = classifyTilt(st);
   return riskLevel(value, rockNames.includes(name) ? thresholds.model2.tiltRock : thresholds.model2.tiltSoil);
 }
 function tiltRateRisk(st, name, value){
+  if (DECK_MODE){ const d = deckTilt(st, name); return d ? d.risk : 'ok'; }
   const base = name.replace(/_rate$/, '');
   const { rockNames } = classifyTilt(st);
   const isRock = rockNames.includes(base);
@@ -1365,6 +1446,7 @@ function tiltRateRisk(st, name, value){
   return risk;
 }
 function moistureRisk(st, name, value){
+  if (DECK_MODE) return 'none';   // the slides show moisture as the response to rain, they set no pass/fail limit
   if (thresholds.activeModel === 'model1') return riskLevel(value, thresholds.model1.moisture);
   const tier = soilDepthTier(st, name);
   const spec = tier === 'deep' ? thresholds.model2.moistDeep : tier === 'mid' ? thresholds.model2.moistMid : thresholds.model2.moistShallow;
@@ -1591,6 +1673,262 @@ function unionFaultFlags(arrs){
   for (const a of arrs) for (let i = 0; i < n; i++) if (a[i]) out[i] = 1;
   return out;
 }
+// ==== TOOLS-PATCH:v1 : no-data bands, ghost of pre-splice data, step finder, speed classes ====
+// speed classes of the slope-stability slides (Sheikh et al. 2021, Table 3), deg/h
+function deckSpeedClass(absRate){
+  return absRate < 0.004 ? { k: 'ช้ามาก', c: '#2E8B57' } : absRate < 0.04 ? { k: 'ช้า', c: '#C99A1B' } : absRate < 0.4 ? { k: 'ปานกลาง', c: '#E8751A' } : { k: 'เร็ว', c: '#C62828' };
+}
+const GAP_STORE_KEY = 'psw_gapbands_v1';
+let gapCfg = { on: true, minMin: 30 };
+try { const r = JSON.parse(localStorage.getItem(GAP_STORE_KEY)); if (r && typeof r === 'object') gapCfg = Object.assign(gapCfg, r); } catch(e){}
+function saveGapCfg(){ try { localStorage.setItem(GAP_STORE_KEY, JSON.stringify(gapCfg)); } catch(e){} }
+function computeGaps(xs, arrs, minSec){
+  const gaps = []; let last = -1; const n = xs.length;
+  for (let i = 0; i < n; i++){
+    let ok = false;
+    for (let k = 0; k < arrs.length; k++){ const v = arrs[k][i]; if (v === v && v != null){ ok = true; break; } }
+    if (!ok) continue;
+    if (last >= 0 && xs[i] - xs[last] >= minSec) gaps.push([xs[last], xs[i]]);
+    last = i;
+  }
+  return gaps;
+}
+let _gapPat = null, _gapPatDpr = 0;
+function gapPattern(ctx, dpr){
+  if (_gapPat && _gapPatDpr === dpr) return _gapPat;
+  const c = document.createElement('canvas'); c.width = c.height = Math.round(8 * dpr);
+  const g = c.getContext('2d'); g.strokeStyle = 'rgba(178,58,42,0.60)'; g.lineWidth = 1.2 * dpr; g.beginPath();
+  const s = 8 * dpr; g.moveTo(0, s); g.lineTo(s, 0); g.moveTo(-s / 4, s / 4); g.lineTo(s / 4, -s / 4); g.moveTo(s - s / 4, s + s / 4); g.lineTo(s + s / 4, s - s / 4); g.stroke();
+  _gapPat = ctx.createPattern(c, 'repeat'); _gapPatDpr = dpr; return _gapPat;
+}
+// hatched red band behind the plot wherever NONE of the chart's main series has a sample for >= gapCfg.minMin minutes
+function drawGapBandsHook(getIdx){
+  let cache = null;
+  return u => {
+    if (!gapCfg.on) return;
+    const xs = u.data[0]; if (!xs || !xs.length) return;
+    const idx = getIdx(u).filter(k => u.data[k]);
+    if (!idx.length) return;
+    const arrs = idx.map(k => u.data[k]);
+    const same = cache && cache.xs === xs && cache.min === gapCfg.minMin && cache.arrs.length === arrs.length && cache.arrs.every((a, i) => a === arrs[i]);
+    if (!same) cache = { xs, min: gapCfg.minMin, arrs, gaps: computeGaps(xs, arrs, gapCfg.minMin * 60) };
+    if (!cache.gaps.length) return;
+    const { ctx } = u, dpr = devicePixelRatio || 1;
+    const left = u.bbox.left, top = u.bbox.top, width = u.bbox.width, height = u.bbox.height;
+    if (width <= 0 || height <= 0) return;
+    ctx.save(); ctx.beginPath(); ctx.rect(left, top, width, height); ctx.clip();
+    const pat = gapPattern(ctx, dpr);
+    ctx.font = (10 * dpr) + 'px "IBM Plex Mono", monospace'; ctx.textBaseline = 'top';
+    cache.gaps.forEach(([a, b]) => {
+      const x1 = u.valToPos(a, 'x', true), x2 = u.valToPos(b, 'x', true);
+      if (x2 < left || x1 > left + width) return;
+      const xa = Math.max(x1, left), xb = Math.min(x2, left + width), w = Math.max(2, xb - xa);
+      ctx.fillStyle = 'rgba(178,58,42,0.07)'; ctx.fillRect(xa, top, w, height);
+      ctx.fillStyle = pat; ctx.fillRect(xa, top, w, height);
+      ctx.fillStyle = 'rgba(178,58,42,0.85)'; ctx.fillRect(xa, top, w, 3 * dpr);
+      const hrs = (b - a) / 3600, txt = 'ไม่มีข้อมูล ' + (hrs < 48 ? hrs.toFixed(hrs < 10 ? 1 : 0) + ' ชม.' : (hrs / 24).toFixed(1) + ' วัน');
+      if (w > ctx.measureText(txt).width + 8 * dpr){ ctx.fillStyle = 'rgba(178,58,42,1)'; ctx.fillText(txt, xa + 4 * dpr, top + 6 * dpr); }
+    });
+    ctx.restore();
+  };
+}
+// min/max of the original (pre-splice) readings in view, so the y axis also makes room for the faint dashed copy
+function ghostExtent(u, spec){
+  const cfg = shiftStore[spec.id], chOwner = spec.primary && spec.primary.chOwner;
+  if (!cfg || !cfg.splices || !cfg.splices.length || !chOwner || !chOwner.CH) return null;
+  const xs = u.data[0]; if (!xs || !xs.length) return null;
+  const deg = trendUnitFor(spec) === '°';
+  const x0 = u.scales.x.min != null ? u.scales.x.min : xs[0], x1 = u.scales.x.max != null ? u.scales.x.max : xs[xs.length - 1];
+  const first = {}; cfg.splices.forEach(sp => sp.channels.forEach(nm => { first[nm] = first[nm] == null ? sp.t : Math.min(first[nm], sp.t); }));
+  let lo = Infinity, hi = -Infinity;
+  Object.keys(first).forEach(nm => {
+    const k = seriesIdxByName(u, nm); if (k < 1 || u.series[k].show === false) return;
+    const raw = chOwner.CH[nm]; if (!raw) return;
+    const i0 = lowerBound(xs, Math.max(first[nm], x0), 0, xs.length), i1 = Math.min(xs.length, lowerBound(xs, x1, 0, xs.length) + 1);
+    const step = Math.max(1, Math.floor((i1 - i0) / 6000));
+    for (let i = i0; i < i1; i += step){ const y = raw[i]; if (y !== y || (deg && Math.abs(y) > 45)) continue; if (y < lo) lo = y; if (y > hi) hi = y; }
+  });
+  return lo <= hi ? [lo, hi] : null;
+}
+// faint dashed copy of the ORIGINAL readings (before any splice) over the stretch that a splice moved
+function drawGhostHook(spec, chOwner){
+  return u => {
+    const cfg = shiftStore[spec.id];
+    if (!cfg || !cfg.splices || !cfg.splices.length || !chOwner || !chOwner.CH) return;
+    const first = {};
+    cfg.splices.forEach(sp => sp.channels.forEach(nm => { first[nm] = first[nm] == null ? sp.t : Math.min(first[nm], sp.t); }));
+    const xs = u.data[0]; if (!xs || !xs.length) return;
+    const { ctx } = u, dpr = devicePixelRatio || 1;
+    const left = u.bbox.left, top = u.bbox.top, width = u.bbox.width, height = u.bbox.height;
+    if (width <= 0 || height <= 0) return;
+    ctx.save(); ctx.beginPath(); ctx.rect(left, top, width, height); ctx.clip();
+    ctx.lineWidth = 1.6 * dpr; ctx.setLineDash([5 * dpr, 4 * dpr]); ctx.globalAlpha = 0.38;
+    let any = false;
+    const deg = trendUnitFor(spec) === '°';
+    Object.keys(first).forEach(nm => {
+      const k = seriesIdxByName(u, nm); if (k < 1 || u.series[k].show === false) return;
+      const raw = chOwner.CH[nm]; if (!raw) return;
+      const st = u.series[k].stroke; ctx.strokeStyle = typeof st === 'function' ? st(u, k) : (st || '#888');
+      let lastX = -1e9, pen = false; ctx.beginPath();
+      for (let i = lowerBound(xs, first[nm], 0, xs.length); i < xs.length; i++){
+        const y = raw[i];
+        if (y !== y || (deg && Math.abs(y) > 45)){ pen = false; continue; }
+        const px = u.valToPos(xs[i], 'x', true);
+        if (px > left + width + 2) break;
+        if (px < left - 2){ continue; }
+        if (pen && Math.abs(px - lastX) < 1) continue;
+        const py = u.valToPos(y, 'y', true);
+        if (!isFinite(py)) continue;
+        if (pen) ctx.lineTo(px, py); else { ctx.moveTo(px, py); pen = true; }
+        lastX = px; any = true;
+      }
+      ctx.stroke();
+    });
+    if (any){
+      ctx.setLineDash([]); ctx.globalAlpha = 0.8; ctx.fillStyle = cssVar('--ink-3') || '#667'; ctx.font = (10 * dpr) + 'px "IBM Plex Mono", monospace'; ctx.textAlign = 'right'; ctx.textBaseline = 'bottom';
+      ctx.fillText('เส้นประจาง = ข้อมูลเดิมก่อนชิป (splice)', left + width - 6 * dpr, top + height - 4 * dpr);
+    }
+    ctx.restore();
+  };
+}
+// sudden level steps (>= minStep deg) found on the native samples, like the slide analysis:
+// median of the next 10 valid samples minus median of the previous 10; exact-zero reset runs are ignored.
+function findStepCandidates(chOwner, names, minStep){
+  const xs = chOwner.xs, all = [];
+  names.forEach(nm => {
+    const arr = chOwner.CH[nm]; if (!arr) return;
+    const fault = (thresholds.faultFilterEnabled && chOwner.FAULT) ? chOwner.FAULT[nm] : null;
+    const n = arr.length, bad = new Uint8Array(n);
+    for (let i = 0; i < n; i++){ if (arr[i] !== arr[i] || Math.abs(arr[i]) > 45 || (fault && fault[i])) bad[i] = 1; }
+    for (let i = 0; i < n; ){
+      if (arr[i] === 0 && !bad[i]){
+        let j = i; while (j < n && (arr[j] === 0 || bad[j])) j++;
+        let p = i - 1; while (p >= 0 && (bad[p] || arr[p] === 0)) p--;
+        if (j - i >= 3 && p >= 0 && Math.abs(arr[p]) > 0.2){ for (let q = i; q < j; q++) bad[q] = 1; }
+        i = j;
+      } else i++;
+    }
+    const idx = []; for (let i = 0; i < n; i++) if (!bad[i]) idx.push(i);
+    const W = 10, cand = [];
+    for (let p = W; p + W <= idx.length; p++){
+      const a = arr[idx[p - 1]], b = arr[idx[p]];
+      if (Math.abs(b - a) < minStep * 0.25) continue;
+      const pre = [], post = [];
+      for (let q = p - W; q < p; q++) pre.push(arr[idx[q]]);
+      for (let q = p; q < p + W; q++) post.push(arr[idx[q]]);
+      const d = dgMedian(post) - dgMedian(pre);
+      if (Math.abs(d) >= minStep) cand.push({ nm, t: xs[idx[p]], delta: d, gapMin: (xs[idx[p]] - xs[idx[p - 1]]) / 60 });
+    }
+    cand.sort((x, y) => Math.abs(y.delta) - Math.abs(x.delta));
+    const kept = [];
+    cand.forEach(c => { if (!kept.some(k => Math.abs(k.t - c.t) < 1800)) kept.push(c); });
+    kept.forEach(c => all.push(c));
+  });
+  all.sort((x, y) => x.t - y.t);
+  const events = []; let cur = null;
+  all.forEach(c => {
+    if (cur && c.t - cur.t1 <= 1800){ cur.t1 = c.t; cur.items.push(c); }
+    else { cur = { t0: c.t, t1: c.t, items: [c] }; events.push(cur); }
+  });
+  events.forEach(e => {
+    e.channels = [...new Set(e.items.map(c => c.nm))];
+    e.maxAbs = Math.max.apply(null, e.items.map(c => Math.abs(c.delta)));
+    e.worst = e.items.slice().sort((x, y) => Math.abs(y.delta) - Math.abs(x.delta))[0];
+  });
+  events.sort((x, y) => y.maxAbs - x.maxAbs);
+  return events;
+}
+// ==== end TOOLS-PATCH:v1 ====
+// ==== TOOLS-PATCH:v2 : tilt status by the slide criteria (speed class of the 7-day trend + sudden steps) ====
+var DECK_MODE = true;
+try { if (localStorage.getItem('psw_deckmode_v1') === '0') DECK_MODE = false; } catch(e){}
+const DECK_CACHE = new Map();
+function deckValidIdx(arr, fault, i0, i1){
+  const bad = new Uint8Array(i1 - i0);
+  for (let i = i0; i < i1; i++){ const v = arr[i]; if (v !== v || Math.abs(v) > 45 || (fault && fault[i])) bad[i - i0] = 1; }
+  for (let i = i0; i < i1; ){
+    if (arr[i] === 0 && !bad[i - i0]){
+      let j = i; while (j < i1 && (arr[j] === 0 || bad[j - i0])) j++;
+      let p = i - 1; while (p >= i0 && (bad[p - i0] || arr[p] === 0)) p--;
+      if (j - i >= 3 && p >= i0 && Math.abs(arr[p]) > 0.2){ for (let q = i; q < j; q++) bad[q - i0] = 1; }
+      i = j;
+    } else i++;
+  }
+  const idx = []; for (let i = i0; i < i1; i++) if (!bad[i - i0]) idx.push(i);
+  return idx;
+}
+// per station, per tilt channel: speed of the trend over the last 7 days (hourly medians, least squares, kept only if R2 >= 0.7),
+// started after the last multi-channel step (visit / reset) if there was one, and any single-channel step >= 0.1 deg.
+const DECK_CL = new Map();
+function deckClusters(st){
+  const T = st.xs[st.n - 1], key = st.id + '|' + T;
+  if (DECK_CL.has(key)) return DECK_CL.get(key);
+  const xs = st.xs, i0 = lowerBound(xs, T - 8 * 86400, 0, xs.length), i1 = st.n;
+  const names = group(st, 'tilt'), W = 10, res = {}, evAll = [], idxOf = {};
+  names.forEach(nm => {
+    const arr = st.CH[nm]; if (!arr) return;
+    const fault = (thresholds.faultFilterEnabled && st.FAULT) ? st.FAULT[nm] : null;
+    const idx = deckValidIdx(arr, fault, i0, i1); idxOf[nm] = idx;
+    let last = null;
+    for (let p = W; p + W <= idx.length; p++){
+      if (Math.abs(arr[idx[p]] - arr[idx[p - 1]]) < 0.025) continue;
+      const pre = [], post = [];
+      for (let q = p - W; q < p; q++) pre.push(arr[idx[q]]);
+      for (let q = p; q < p + W; q++) post.push(arr[idx[q]]);
+      const d = dgMedian(post) - dgMedian(pre);
+      if (Math.abs(d) < 0.1) continue;
+      const tt = xs[idx[p]];
+      if (last && tt - last.t < 1800){ if (Math.abs(d) > Math.abs(last.d)){ last.d = d; last.t = tt; } }
+      else { last = { nm, t: tt, d, gapMin: (xs[idx[p]] - xs[idx[p - 1]]) / 60 }; evAll.push(last); }
+    }
+  });
+  evAll.sort((a, b) => a.t - b.t);
+  const clusters = []; let cur = null;
+  evAll.forEach(e => { if (cur && e.t - cur.t1 <= 1800){ cur.t1 = e.t; cur.items.push(e); } else { cur = { t0: e.t, t1: e.t, items: [e] }; clusters.push(cur); } });
+  clusters.forEach(c => { c.chs = new Set(c.items.map(e => e.nm)).size; c.multi = c.chs >= 3 || c.items.some(e => Math.abs(e.d) > 5); });
+  const out = { T, xs, names, idxOf, clusters }; DECK_CL.clear(); DECK_CL.set(key, out); return out;
+}
+function deckStation(st){
+  const T = st.xs[st.n - 1], key = st.id + '|' + T;
+  if (DECK_CACHE.has(key)) return DECK_CACHE.get(key);
+  const { xs, names, idxOf, clusters } = deckClusters(st), res = {};
+  // a step that also shows up (>= 3 channels, or > 5 deg) at the other station within 30 min is the same visit / reset
+  clusters.forEach(c => { if (!c.multi && STATIONS.some(o => o !== st && deckClusters(o).clusters.some(oc => oc.multi && oc.t0 <= c.t1 + 1800 && oc.t1 >= c.t0 - 1800))) c.multi = true; });
+  const lastMulti = clusters.filter(c => c.multi).pop();
+  names.forEach(nm => {
+    const arr = st.CH[nm]; if (!arr || !idxOf[nm]) return;
+    const mine = clusters.filter(c => !c.multi && c.items.some(e => e.nm === nm)).map(c => c.items.filter(e => e.nm === nm).sort((a, b) => Math.abs(b.d) - Math.abs(a.d))[0]);
+    const lastLevel = mine.length ? mine[mine.length - 1] : null;                         // any >= 0.1 deg level change of this channel (also across a data gap)
+    const step = mine.filter(e => e.gapMin <= 5 && Math.abs(e.d) >= 0.25).pop() || null;   // sudden step: within the 1-minute sampling, >= 0.25 deg
+    const wStart = Math.max(T - 7 * 86400, lastMulti ? lastMulti.t1 + 86400 : 0, lastLevel ? lastLevel.t + 3600 : 0);
+    const hourly = new Map();
+    idxOf[nm].forEach(i => { if (xs[i] < wStart) return; const h = Math.floor((xs[i] - wStart) / 3600); (hourly.get(h) || hourly.set(h, []).get(h)).push(arr[i]); });
+    const hs = [...hourly.keys()].sort((a, b) => a - b);
+    let slope = NaN, r2 = NaN, days = (T - wStart) / 86400;
+    if (hs.length >= 48){
+      let n = 0, Sx = 0, Sy = 0, Sxx = 0, Sxy = 0, Syy = 0;
+      hs.forEach(h => { const y = dgMedian(hourly.get(h)); n++; Sx += h; Sy += y; Sxx += h * h; Sxy += h * y; Syy += y * y; });
+      const dx = n * Sxx - Sx * Sx, dy = n * Syy - Sy * Sy;
+      if (dx > 0){ slope = (n * Sxy - Sx * Sy) / dx; r2 = dy > 0 ? Math.pow(n * Sxy - Sx * Sy, 2) / (dx * dy) : 0; }
+    }
+    const trend = slope === slope && r2 >= 0.7;
+    const cls = trend ? deckSpeedClass(Math.abs(slope)) : null;
+    let risk = 'ok';
+    if (cls && cls.k === 'ช้า') risk = 'warn'; else if (cls && (cls.k === 'ปานกลาง' || cls.k === 'เร็ว')) risk = 'crit';
+    if (step && risk === 'ok') risk = 'warn';
+    const d = new Date((T + 7 * 3600) * 1000);
+    let sub;
+    if (trend) sub = cls.k + ' · R² ' + r2.toFixed(2) + ' · ' + Math.min(7, days).toFixed(1) + ' d';
+    else if (hs.length < 48) sub = 'รอข้อมูลหลังรีเซ็ต';
+    else sub = 'ไม่มีแนวโน้มชัด · R² ' + (r2 === r2 ? r2.toFixed(2) : '–');
+    if (step) sub = 'step ' + (step.d >= 0 ? '+' : '') + step.d.toFixed(2) + '° ' + fmtDate(step.t).slice(0, 6) + ' · ' + sub;
+    res[nm] = { slope, r2, trend, cls, risk, step, valueStr: trend ? (slope >= 0 ? '+' : '') + slope.toFixed(4) : '–', sub };
+  });
+  DECK_CACHE.clear(); DECK_CACHE.set(key, res);
+  return res;
+}
+function deckTilt(st, nm){ const r = deckStation(st); return r[nm.replace(/_rate$/, '')] || null; }
+// ==== end TOOLS-PATCH:v2 ====
 // draws a light shaded band behind the plot over each fault-filtered span
 // currently in view — same clip/bbox pattern as drawThresholdsHook, but a
 // fill instead of a dashed line, and gated on the filter toggle itself so
@@ -1912,6 +2250,10 @@ function renderOverviewTiles(){
       if (!arr) return '';
       const idx = lastValidIndex(arr);
       const v = idx >= 0 ? arr[idx] : NaN;
+      if (DECK_MODE){
+        const dk = deckTilt(st, nm);
+        if (dk){ stationRisk = worseRisk(stationRisk, dk.risk); return riskTile(dk.risk, dk.valueStr, nm, dk.sub + ' · °/h', { st: st.id, kind: 'rate', ch: nm }, staleSuffix(st, lastValidIndex(st.CH[nm]), lastT)); }
+      }
       const fault = st.FAULT && st.FAULT[rn];
       if (thresholds.faultFilterEnabled && idx >= 0 && fault && fault[idx]){
         return riskTile('fault', v.toFixed(4), nm, '⚠ sensor fault — excluded', { st: st.id, kind: 'rate', ch: nm });
@@ -3105,7 +3447,16 @@ function drawUserLinesHook(spec){
         ctx.beginPath(); ctx.arc(px, py, 3 * dpr, 0, 2 * Math.PI);
         ctx.fillStyle = col; ctx.fill();
       });
-      if (ln.fit) tags.push({ text: label, x: px2, y: py2, col });
+      if (ln.fit){
+        const f2 = fitSeriesWindow(u, spec, ln.nm, ln.w1, ln.w2), un2 = trendUnitFor(spec);
+        let tcol = col, ttxt = label;
+        if (f2 && isFinite(f2.a)){
+          ttxt = label + ' ' + fmtSlope(f2.a) + (un2 || '') + '/h';
+          ttxt += ' · ' + fmtShort(f2.xFirst) + '→' + fmtShort(f2.xLast);
+          if (un2 === '\u00b0'){ const sc = deckSpeedClass(Math.abs(f2.a)); tcol = sc.c; ttxt += ' ' + sc.k; }
+        }
+        tags.push({ text: ttxt, x: px2, y: py2, col: tcol });
+      }
     });
     drawFitTags(ctx, tags, dpr, left, top, width, height);
     // aiming: the stretch between the first click and the cursor, plus which series it would fit
@@ -3727,6 +4078,16 @@ function openShiftEditor(btn, u, spec, primaryNames, chOwner, badge){
     const o = mk('option', null, c.nm + ' · ' + fmtDate(c.t0) + ' → ' + fmtDate(c.t1) + ' (' + (c.hours < 48 ? c.hours.toFixed(0) + ' h' : (c.hours / 24).toFixed(1) + ' d') + ') · jump ' + (c.jump >= 0 ? '+' : '') + c.jump.toFixed(2));
     o.value = String(i); sugSel.appendChild(o);
   });
+  const stepC = (trendUnitFor(spec) === '°') ? findStepCandidates(chOwner, primaryNames, 0.1).slice(0, 30) : [];
+  if (stepC.length){
+    const og = document.createElement('optgroup'); og.label = 'sudden steps >= 0.1° on the raw samples, grouped by event (biggest first)';
+    stepC.forEach((e, i) => {
+      const when = e.t1 - e.t0 < 120 ? fmtDate(e.t0) : fmtDate(e.t0) + ' → ' + fmtBkkLocal(e.t1).slice(11) + ' ICT';
+      const o = mk('option', null, when + ' · ' + e.channels.length + ' ch · max ' + (e.worst.delta >= 0 ? '+' : '') + e.worst.delta.toFixed(2) + '° (' + e.worst.nm + ')' + (e.channels.length >= 3 || e.maxAbs > 5 ? ' · several channels at once = visit/reset?' : ''));
+      o.value = 's' + i; og.appendChild(o);
+    });
+    sugSel.appendChild(og);
+  }
   shiftPopover.appendChild(sugSel);
 
   const toolRow = mk('div', 'cf-toolrow');
@@ -3794,6 +4155,12 @@ function openShiftEditor(btn, u, spec, primaryNames, chOwner, badge){
 
   sugSel.onchange = () => {
     if (sugSel.value === '') return;
+    if (String(sugSel.value).charAt(0) === 's'){
+      const e = stepC[Number(String(sugSel.value).slice(1))];
+      draft.channels = e.channels.slice(); draft.t = fmtBkkLocal(Math.ceil((e.t1 + 60) / 60) * 60); draft.b = e.t0 - 60; draft.mode = 'auto'; draft.hours = 1;
+      openShiftEditor(btn, u, spec, primaryNames, chOwner, badge);
+      return;
+    }
     const c = cands[Number(sugSel.value)];
     draft.channels = [c.nm]; draft.t = fmtBkkLocal(c.t1);
     draft.mode = 'auto';
@@ -3816,6 +4183,7 @@ function openShiftEditor(btn, u, spec, primaryNames, chOwner, badge){
     if (!selected.length){ err.textContent = 'check at least one channel'; return; }
     const cur = shiftStore[spec.id] || { splices: [] };
     const sp = { id: cur.splices.reduce((m, s) => Math.max(m, s.id || 0), 0) + 1, t, channels: selected, mode: draft.mode };
+    if (draft.b != null && isFinite(draft.b) && draft.b < t){ sp.b = draft.b; } draft.b = null;
     if (draft.mode === 'manual') sp.add = draft.add; else sp.hours = Math.min(168, Math.max(1, draft.hours));
     cur.splices.push(sp);
     shiftStore[spec.id] = cur;
@@ -4395,6 +4763,15 @@ function makeChartNow(spec){
       ? spec.primary.range
       : (u, dMin, dMax) => spec.primary.range;
   }
+  if (!spec.primary.range){
+    scales.y.range = (u, dMin, dMax) => {
+      let lo = dMin, hi = dMax;
+      const g = ghostExtent(u, spec);
+      if (g){ lo = lo == null ? g[0] : Math.min(lo, g[0]); hi = hi == null ? g[1] : Math.max(hi, g[1]); }
+      if (lo == null || hi == null) return [0, 100];
+      return uPlot.rangeNum(lo, hi, { min: { mode: 3, pad: 0.1 }, max: { mode: 3, pad: 0.1 } });
+    };
+  }
   const axes = [ axisOpts('x', 2), axisOpts('y', 3, { size: 56, label: spec.primary.label }) ];
   if (hasSecondary){
     scales.y2 = dailyBarsMax != null
@@ -4404,6 +4781,7 @@ function makeChartNow(spec){
   }
 
   const drawHooks = [ drawThresholdsHook(spec.thresholds), drawShiftBoundaryHook(spec.id) ];
+  if (spec.primary && spec.primary.chOwner) drawHooks.push(drawGhostHook(spec, spec.primary.chOwner));
   if (rainModes){
     drawHooks.push(drawDayBarsHook(
       rainSeriesIdx, rainDays,
@@ -4435,6 +4813,7 @@ function makeChartNow(spec){
     drawHooks.push(trendDrawHook(spec, () => trendArmed));
   }
   const drawClearHooks = spec.faultBands ? [ drawFaultBandsHook(spec.faultBands) ] : [];
+  drawClearHooks.push(drawGapBandsHook(() => primaryNames.map((_, i) => i + 1)));
   let measureArmed = false, lastRateHTML = null;
   if (spec.measurable){
     drawHooks.push(u => {
@@ -7573,7 +7952,16 @@ function init(){
   btn(gFilter, '', 'Filter', () => chartTool('filter'), 'hide readings flagged as sensor faults, or values outside a min / max (point at a chart first)');
   btn(gFilter, '', 'Channels', () => chartTool('show'), 'choose which channels are drawn on the chart you point at');
   const gAlign = grp(clnB, 'Sensor swap');
-  btn(gAlign, '', 'Splice', () => chartTool('splice'), 'join a channel across a sensor swap or reinstall so the line continues (view only, the data is not changed)');
+  btn(gAlign, '', 'Shift / Splice', () => chartTool('splice'), 'shift a channel at a step (sensor swap, reinstall, visit) so the line continues; the original data stays visible as a faint dashed line. Offers the sudden steps it finds on the raw samples (view only, the data is not changed)');
+  const gGap = grp(clnB, 'Missing data');
+  const gl1 = el('label', 'rb-ctl'); const gcb = document.createElement('input'); gcb.type = 'checkbox'; gcb.checked = !!gapCfg.on;
+  gl1.append(gcb, document.createTextNode(' red hatched band where there is no data'));
+  const gl2 = el('label', 'rb-ctl', 'gap of at least '); const gsel = el('select');
+  [10, 30, 60, 120, 360].forEach(m => gsel.add(new Option(m < 60 ? m + ' min' : (m / 60) + ' h', m))); gsel.value = gapCfg.minMin; gl2.appendChild(gsel);
+  const gapRedraw = () => { saveGapCfg(); charts.forEach(c => { try { c.u.redraw(); } catch(e){} }); };
+  gcb.onchange = () => { gapCfg.on = gcb.checked; gapRedraw(); };
+  gsel.onchange = () => { gapCfg.minMin = +gsel.value; gapRedraw(); };
+  gGap.append(gl1, gl2);
   const gNote = grp(clnB, 'Notes and names');
   syncBtns.filter(b => b.textContent.trim() !== 'sync').forEach(b => gNote.appendChild(b));
   const gUndo = grp(clnB, 'Undo', 'charts');
@@ -7583,6 +7971,8 @@ function init(){
   btn(gFit, '', 'Trendline', () => chartTool('trendline'), 'straight line through the window you are looking at (zoom first)');
   btn(gFit, '', 'Draw & fit', () => chartTool('draw'), 'click two points on the chart; the nearest series is fitted');
   btn(gFit, '', 'Measure rate', () => chartTool('measure'), 'rate of change in degrees per hour over the zoomed window');
+  const gSlide = grp(anaB, 'Slide method');
+  btn(gSlide, '', 'Auto trend lines', () => { if (window.PSWTrendsUI) PSWTrendsUI.open(); }, 'step-corrected daily tilt with piecewise trend lines, speed classes and a table - the same analysis as the slides');
   const gCh = grp(anaB, 'Chart');
   btn(gCh, '', 'Chart height', () => chartTool('size'), 'make the chart under the mouse taller or shorter');
 
@@ -7825,4 +8215,528 @@ function init(){
 })();
 
 </script><!--RIBBON-JS:END-->
+<!--HOME-JS:START--><script>
+/* Station-map landing page: first screen = where our stations are; click one -> its sensor layout (Overview).
+   Adding a station = one more entry in HOME_STATIONS (id must match STATIONS[].id in the dashboard). */
+(function(){
+const HOME_STATIONS = [
+  { id: 'st1', code: 'สฎ.6063', name: 'หน้าอำเภอ–บ้านเหนือ', area: 'เกาะพะงัน จ.สุราษฎร์ธานี', lat: 9.7484, lon: 100.0657 },
+  { id: 'st2', code: 'สฎ.6064', name: 'บ้านใต้–หาดริ้น', area: 'เกาะพะงัน จ.สุราษฎร์ธานี', lat: 9.6830, lon: 100.0558 },
+];
+const LEAFLET_CSS = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.css';
+const LEAFLET_JS = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.js';
+const WORDS = { ok: 'ปกติ · Normal', warn: 'เฝ้าระวัง · Watch', crit: 'วิกฤต · Critical', stale: 'ข้อมูลล่าช้า · Delayed' };
+
+if (!/^#(st\d+)$/.test(location.hash || '')) document.body.classList.add('home-on');
+function el(tag, cls, txt){ const e = document.createElement(tag); if (cls) e.className = cls; if (txt != null) e.textContent = txt; return e; }
+function ready(){
+  return typeof STATIONS !== 'undefined' && typeof applyPage === 'function' && typeof applyStation === 'function' &&
+    typeof dgRainWindow === 'function' && document.getElementById('app') && document.getElementById('app').style.display !== 'none' &&
+    document.querySelector('#summary .rtile') && document.getElementById('rb');
+}
+let tries = 0;
+(function wait(){ if (ready()){ init(); return; } if (++tries > 300){ return; } setTimeout(wait, 100); })();
+
+function stationData(meta){
+  const st = STATIONS.find(s => s.id === meta.id); if (!st) return null;
+  const T = st.xs[st.n - 1];
+  const ageH = (Date.now() / 1000 - T) / 3600;
+  const tiles = [...document.querySelectorAll('#summary [data-section="' + st.id + '"] .rtile')];
+  const c = { ok: 0, warn: 0, crit: 0, fault: 0, stale: 0 };
+  tiles.forEach(t => { const k = [...t.classList].find(x => x.indexOf('risk-') === 0); if (k && c[k.slice(5)] != null) c[k.slice(5)]++; });
+  let level = c.crit ? 'crit' : c.warn ? 'warn' : 'ok';
+  const delayed = ageH > 24;
+  const soil = Object.keys(st.CH).filter(n => /^soil_moisture_/.test(n)).map(n => lastValid(st.CH[n])).filter(v => v === v);
+  const when = new Date((T + 7 * 3600) * 1000).toISOString().slice(0, 16).replace('T', ' ');
+  return { st, T, ageH, delayed, level, c, when,
+    rain24: dgRainWindow(st, T - 86400, T), rain1: dgRainWindow(st, T - 3600, T),
+    soilMax: soil.length ? Math.max.apply(null, soil) : NaN, nTiles: tiles.length };
+}
+function fmt(v, d){ return v === v && v != null ? v.toFixed(d == null ? 1 : d) : '–'; }
+function ageText(h){ return h < 48 ? Math.round(h) + ' ชม.' : (h / 24).toFixed(1) + ' วัน'; }
+function cardHTML(meta, d){
+  const lv = d.delayed && d.level === 'ok' ? 'stale' : d.level;
+  return '<div class="hm-row"><div><h4 style="margin:0;font:600 15px IBM Plex Sans,sans-serif">' + meta.code + ' · ' + meta.name + '</h4>' +
+    '<div class="hm-loc" style="font-size:12px;color:var(--ink-3)">' + meta.area + '</div></div>' +
+    '<span class="hm-chip ' + lv + '">' + WORDS[lv] + '</span></div>' +
+    '<div style="font-size:12px;color:var(--ink-3);margin-top:4px">ข้อมูลล่าสุด ' + d.when + ' ICT' + (d.delayed ? ' (ผ่านมา ' + ageText(d.ageH) + ' · * ค่าฝนนับย้อนจากข้อมูลล่าสุด)' : '') + '</div>' +
+    '<div class="hm-tiles">' +
+    '<div class="hm-t"><span>ฝน 24 ชม. · Rain 24 h' + (d.delayed ? '*' : '') + '</span><b>' + fmt(d.rain24) + '</b><em>mm</em></div>' +
+    '<div class="hm-t"><span>ฝน 1 ชม. · Rain 1 h' + (d.delayed ? '*' : '') + '</span><b>' + fmt(d.rain1) + '</b><em>mm</em></div>' +
+    '<div class="hm-t"><span>ความชื้นดินสูงสุด · Soil max</span><b>' + fmt(d.soilMax) + '</b><em>%</em></div>' +
+    '<div class="hm-t"><span>ช่องวัด เฝ้าระวัง / วิกฤต</span><b>' + d.c.warn + ' / ' + d.c.crit + '</b><em>จาก ' + d.nTiles + '</em></div></div>';
+}
+function openStation(id){
+  const st = STATIONS.find(s => s.id === id); if (!st) return;
+  activeStation = id; activePage = 'overview';
+  document.body.classList.remove('home-on');
+  try { applyStation(); applyPage(); } catch (e) { console.error(e); }
+  window.scrollTo(0, 0);
+  window.dispatchEvent(new Event('resize'));
+}
+function showHome(){
+  document.body.classList.add('home-on');
+  window.scrollTo(0, 0);
+  if (window.__hmMap) setTimeout(() => window.__hmMap.invalidateSize(), 60);
+}
+function route(){
+  const h = (location.hash || '').replace('#', '');
+  if (STATIONS.some(s => s.id === h)) openStation(h); else showHome();
+}
+function init(){
+  const app = document.getElementById('app');
+  const home = el('section'); home.id = 'home';
+  home.innerHTML =
+    '<div class="hm-head"><h2>แผนที่สถานีติดตาม · Station map</h2><span class="hm-sub">เลือกสถานีเพื่อดูผังเซนเซอร์และค่าล่าสุด</span></div>' +
+    '<div class="hm-grid"><div class="hm-card hm-mapwrap"><div id="hm-map" role="application" aria-label="แผนที่สถานีติดตามบนเกาะพะงัน"></div>' +
+    '<div class="hm-fallback" id="hm-fb">โหลดแผนที่ไม่ได้ (ต้องต่ออินเทอร์เน็ต) ใช้รายชื่อสถานีทางขวาแทนได้</div></div>' +
+    '<div class="hm-card hm-list" id="hm-list"><h3>Stations · สถานี</h3></div></div>';
+  app.parentNode.insertBefore(home, app);
+
+  const list = document.getElementById('hm-list');
+  const data = HOME_STATIONS.map(m => ({ m, d: stationData(m) })).filter(x => x.d);
+  data.forEach(({ m, d }) => {
+    const b = el('button', 'hm-st'); b.type = 'button';
+    b.innerHTML = cardHTML(m, d); b.onclick = () => { location.hash = m.id; };
+    list.appendChild(b);
+  });
+  list.appendChild(el('div', 'hm-note',
+    'ตำแหน่งบนแผนที่เป็นจุดกลางพื้นที่ติดตั้งโดยประมาณ ไม่ใช่พิกัดเซนเซอร์ · สถานะนับจากเกณฑ์เดิมของหน้าผังเซนเซอร์ ยังไม่ใช่การประเมินเชิงพื้นที่'));
+
+  // back button inside the ribbon (and a fallback under the title)
+  const top = document.querySelector('#rb .rb-top');
+  if (top){ const b = el('button', 'home-back', '← แผนที่สถานี'); b.type = 'button'; b.onclick = () => { location.hash = 'map'; }; top.insertBefore(b, top.firstChild); }
+
+  window.addEventListener('hashchange', route);
+  route();
+  loadMap(data);
+}
+function loadMap(data){
+  const fb = document.getElementById('hm-fb'), mapEl = document.getElementById('hm-map');
+  function fail(){ mapEl.style.display = 'none'; fb.style.display = 'block'; }
+  if (window.L){ buildMap(data); return; }
+  const css = el('link'); css.rel = 'stylesheet'; css.href = LEAFLET_CSS; document.head.appendChild(css);
+  const s = el('script'); s.src = LEAFLET_JS; s.onload = () => { try { buildMap(data); } catch (e) { console.error(e); fail(); } }; s.onerror = fail;
+  document.head.appendChild(s);
+}
+function buildMap(data){
+  const map = L.map('hm-map', { zoomControl: true }).fitBounds(data.map(x => [x.m.lat, x.m.lon]), { padding: [60, 60], maxZoom: 13 });
+  window.__hmMap = map;
+  const sat = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', { maxZoom: 19, attribution: 'Esri World Imagery' });
+  const osm = L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19, attribution: '© OpenStreetMap' });
+  sat.addTo(map); L.control.layers({ 'ดาวเทียม': sat, 'ถนน': osm }, null, { position: 'topright' }).addTo(map);
+  data.forEach((x, i) => {
+    const lv = x.d.delayed && x.d.level === 'ok' ? 'stale' : x.d.level;
+    const icon = L.divIcon({ html: '<div class="hm-mk ' + lv + '">' + (i + 1) + '</div>', className: '', iconSize: [28, 28], iconAnchor: [14, 14] });
+    const mk = L.marker([x.m.lat, x.m.lon], { icon, title: x.m.code + ' ' + x.m.name }).addTo(map);
+    mk.bindPopup('<div class="hm-pop">' + cardHTML(x.m, x.d) + '<button class="hm-open" data-open="' + x.m.id + '">เปิดผังเซนเซอร์ · Open sensor layout →</button></div>', { maxWidth: 300 });
+  });
+  map.on('popupopen', e => { const b = e.popup.getElement().querySelector('[data-open]'); if (b) b.onclick = () => { location.hash = b.dataset.open; }; });
+}
+})();
+
+</script><!--HOME-JS:END-->
+<!--TRENDS-JS:START--><script>
+/* Slide-method tilt analysis in JavaScript: the same steps as prep_analysis.py (the analysis behind the slides).
+ *   clean minutes -> daily median / daily mean -> step detection -> step-corrected daily series (base = first 3 days from 27 Jun)
+ *   -> blocks of usable days -> piecewise-linear fit -> merge -> classify (trend / wander / stable / event) -> speed class.
+ * Pure functions: works in the browser (window.PSWTrends) and in Node (module.exports) so it can be checked against Python.
+ * Input: { st1: { xs: epoch seconds (1-min grid), CH: { tilt_1_x: Float64Array, ... } }, st2: {...} }   (all constants below = prep_analysis.py)
+ */
+(function (root) {
+'use strict';
+const TILT_MAX = 45.0, ALLZERO_FRAC = 0.7, ZERO_EPS = 0.005, MIN_MIN_TILT = 240, MEAN_BAND = 0.2, MEAN_MIN_KEEP = 120, MIN_MIN_VALID = 720;
+const STEP_SMALL = 0.5, STEP_COMMON_N = 3, STEP_SINGLE = 5.0;
+const BASE_DATE = '2026-06-27', BASE_NDAYS = 3;
+const EP_EV_MIN = 0.02, EP_REL_MIN = 0.10, EP_TREND_R2 = 0.7, EP_TREND_DAYS = 10, EP_MINSEG = 5, EP_KMAX = 8, EP_SIG_MIN = 0.002;
+const EP_SETTLE_K = 3.0, EP_SETTLE_DAYS = 3, EP_SETTLE_MAX = 7, EP_BREAK_MIN = EP_EV_MIN, EP_SPLIT_GAIN = 0.5;
+const ANALOG_TOL = 0.5, ANALOG_NIGHT_MIN = 60, GAP_CONT_DAYS = 2;
+const ANALOG_CUT = { st1: [['2026-10-09 10:00', '2026-10-10 09:59', ['tilt_5', 'tilt_6', 'tilt_7']]], st2: [['2026-10-09 15:00', '2026-10-10 20:59', ['tilt_5', 'tilt_6']]] };
+const FIRST_VALID = { st1: '2026-06-25 16:00', st2: '2026-06-25 16:30' };
+const VISIT_STEPS = { st2: ['2026-10-10'] }, VISIT_STEP_MIN = 0.1;
+const BOXES = { st1: { '10': ['tilt_8', 'soil_moisture_1', 'soil_moisture_2', 'soil_moisture_3', 'soil_temp_1', 'soil_temp_2', 'soil_temp_3'],
+                       '12': ['tilt_9', 'soil_moisture_4', 'soil_moisture_5', 'soil_moisture_6', 'soil_temp_4', 'soil_temp_5', 'soil_temp_6'] } };
+const FROZEN_MIN = 360, FROZEN_MERGE = 180;
+
+function epochOfLocal(s) { const m = /^(\d{4})-(\d\d)-(\d\d)(?:[ T](\d\d):(\d\d))?/.exec(s); return Date.UTC(+m[1], +m[2] - 1, +m[3], +(m[4] || 0), +(m[5] || 0)) / 1000 - 25200; }
+function dayOf(t) { return Math.floor((t + 25200) / 86400); }
+function dayOfStr(s) { return dayOf(epochOfLocal(s)); }
+function dayLabel(d) { return new Date(d * 86400000).toISOString().slice(0, 10); }
+function median(a) { const n = a.length; if (!n) return NaN; const s = Float64Array.from(a).sort(); return n % 2 ? s[(n - 1) / 2] : (s[n / 2 - 1] + s[n / 2]) / 2; }
+function tiltKey(c) { const p = c.split('_'); return [parseInt(p[1], 10), p[2] || '']; }
+function cmpTilt(a, b) { const x = tiltKey(a), y = tiltKey(b); return x[0] - y[0] || (x[1] < y[1] ? -1 : x[1] > y[1] ? 1 : 0); }
+function upperBound(xs, t) { let lo = 0, hi = xs.length; while (lo < hi) { const m = (lo + hi) >> 1; if (xs[m] <= t) lo = m + 1; else hi = m; } return lo; }
+function lowerBound(xs, t) { let lo = 0, hi = xs.length; while (lo < hi) { const m = (lo + hi) >> 1; if (xs[m] < t) lo = m + 1; else hi = m; } return lo; }
+
+function lin(x, y) {                       // least squares, like np.polyfit(x, y, 1); returns [slope, intercept, SSE]
+  const n = x.length; let sx = 0, sy = 0;
+  for (let i = 0; i < n; i++) { sx += x[i]; sy += y[i]; }
+  const mx = sx / n, my = sy / n; let sxx = 0, sxy = 0;
+  for (let i = 0; i < n; i++) { const dx = x[i] - mx; sxx += dx * dx; sxy += dx * (y[i] - my); }
+  const a = sxx > 0 ? sxy / sxx : 0, b = my - a * mx; let sse = 0;
+  for (let i = 0; i < n; i++) { const r = y[i] - (a * x[i] + b); sse += r * r; }
+  return [a, b, sse];
+}
+
+// ---------------------------------------------------------------- minutes -> clean minutes
+function findFrozen(k, xs, cols) {
+  const out = [], bx = BOXES[k] || {};
+  Object.keys(bx).forEach(box => {
+    const cs = bx[box].filter(c => cols[c]); if (!cs.length) return;
+    const n = xs.length, runs = []; let start = -1;
+    for (let i = 0; i <= n; i++) {
+      let still = false;
+      if (i > 0 && i < n) { still = true; for (const c of cs) { const v = cols[c][i], p = cols[c][i - 1]; if (!(v === v && p === p && v === p)) { still = false; break; } } }
+      if (still && start < 0) start = i;
+      if (!still && start >= 0) { if (i - start >= FROZEN_MIN) runs.push([start, i - 1]); start = -1; }
+    }
+    const merged = [];
+    runs.forEach(([a, b]) => { if (merged.length && (xs[a] - xs[merged[merged.length - 1][1]]) < FROZEN_MERGE * 60) merged[merged.length - 1][1] = b; else merged.push([a, b]); });
+    merged.forEach(([a, b]) => out.push({ box, a, b, chans: cs }));
+  });
+  return out;
+}
+function cleanTilt(k, S) {
+  const xs = S.xs, n = xs.length, cols = {};
+  const need = new Set(); Object.keys(BOXES[k] || {}).forEach(bx => BOXES[k][bx].forEach(c => need.add(c)));
+  Object.keys(S.CH).filter(c => /^tilt_\d+(_[xy])?$/.test(c) || need.has(c)).forEach(c => { cols[c] = Float64Array.from(S.CH[c]); });
+  const fv = FIRST_VALID[k];
+  if (fv) { const e = upperBound(xs, epochOfLocal(fv)); Object.keys(cols).filter(c => /^(tilt|soil)/.test(c)).forEach(c => { for (let i = 0; i < e; i++) cols[c][i] = NaN; }); }
+  const frozen = findFrozen(k, xs, cols);
+  frozen.forEach(f => f.chans.forEach(c => { for (let i = f.a; i <= f.b; i++) cols[c][i] = NaN; }));
+  const tc = Object.keys(cols).filter(c => /^tilt_\d+(_[xy])?$/.test(c)).sort(cmpTilt);
+  const t = {}; tc.forEach(c => { const a = new Float64Array(n); for (let i = 0; i < n; i++) { const v = cols[c][i]; a[i] = Math.abs(v) < TILT_MAX ? v : NaN; } t[c] = a; });
+  let nAllZero = 0;
+  for (let i = 0; i < n; i++) {
+    let z = 0; for (const c of tc) if (Math.abs(cols[c][i]) < ZERO_EPS) z++;
+    if (z >= ALLZERO_FRAC * tc.length) { nAllZero++; for (const c of tc) t[c][i] = NaN; }
+  }
+  (ANALOG_CUT[k] || []).forEach(([a, b, cs]) => { const i0 = lowerBound(xs, epochOfLocal(a)), i1 = upperBound(xs, epochOfLocal(b)); cs.forEach(c => { if (t[c]) for (let i = i0; i < i1; i++) t[c][i] = NaN; }); });
+  // analog (one underscore) channels: drop minutes further than ANALOG_TOL from BOTH night-time levels of their day
+  const day = new Int32Array(n), hr = new Int8Array(n);
+  for (let i = 0; i < n; i++) { const l = xs[i] + 25200; day[i] = Math.floor(l / 86400); hr[i] = Math.floor((l % 86400) / 3600); }
+  tc.filter(c => c.split('_').length === 2).forEach(c => {
+    const v = t[c], g = [new Map(), new Map()];
+    for (let i = 0; i < n; i++) { if (v[i] !== v[i]) continue; const m = hr[i] < 6 ? 0 : hr[i] >= 18 ? 1 : -1; if (m < 0) continue; (g[m].get(day[i]) || g[m].set(day[i], []).get(day[i])).push(v[i]); }
+    const ref = g.map(mp => { const r = new Map(); mp.forEach((a, d) => { if (a.length >= ANALOG_NIGHT_MIN) r.set(d, median(a)); }); return r; });
+    const drop = [];
+    for (let i = 0; i < n; i++) {
+      const r0 = ref[0].get(day[i]), r1 = ref[1].get(day[i]);
+      if (r0 === undefined && r1 === undefined) continue;
+      const good = (r0 !== undefined && Math.abs(v[i] - r0) <= ANALOG_TOL) || (r1 !== undefined && Math.abs(v[i] - r1) <= ANALOG_TOL);
+      if (!good) drop.push(i);
+    }
+    drop.forEach(i => { v[i] = NaN; });
+  });
+  return { tc, t, frozen, nAllZero };
+}
+
+// ---------------------------------------------------------------- daily frames
+function dailyFrames(xs, tc, t) {
+  const n = xs.length, d0 = dayOf(xs[0]), d1 = dayOf(xs[n - 1]), nd = d1 - d0 + 1;
+  const starts = new Int32Array(nd + 1).fill(-1);
+  for (let i = n - 1; i >= 0; i--) starts[dayOf(xs[i]) - d0] = i;
+  for (let d = nd - 1; d >= 0; d--) if (starts[d] < 0) starts[d] = d + 1 <= nd ? starts[d + 1] : n; starts[nd] = n;
+  const med = {}, mean = {}, cnt = {};
+  tc.forEach(c => {
+    const m = new Float64Array(nd).fill(NaN), mu = new Float64Array(nd).fill(NaN), ct = new Int32Array(nd), digital = c.split('_').length === 3, v = t[c];
+    for (let d = 0; d < nd; d++) {
+      const vals = []; for (let i = starts[d]; i < starts[d + 1]; i++) if (v[i] === v[i]) vals.push(v[i]);
+      ct[d] = vals.length; if (!vals.length) continue;
+      const md = median(vals);
+      let out = md;
+      if (digital) { let s = 0, k = 0; for (const x of vals) if (Math.abs(x - md) <= MEAN_BAND) { s += x; k++; } if (k >= MEAN_MIN_KEEP) out = s / k; }
+      if (vals.length >= MIN_MIN_TILT) { m[d] = md; mu[d] = out; }
+    }
+    med[c] = m; mean[c] = mu; cnt[c] = ct;
+  });
+  return { d0, nd, med, mean, cnt };
+}
+function deltas(arr, from) {                 // difference to the previous non-NaN day, from day index `from` on
+  const out = new Float64Array(arr.length).fill(NaN); let prev = NaN;
+  for (let d = from; d < arr.length; d++) { if (arr[d] !== arr[d]) continue; if (prev === prev) out[d] = arr[d] - prev; prev = arr[d]; }
+  return out;
+}
+function movedCount(fr, tc, from) {
+  const n = new Int32Array(fr.nd), dl = {};
+  tc.forEach(c => { dl[c] = deltas(fr.med[c], from); for (let d = 0; d < fr.nd; d++) if (Math.abs(dl[c][d]) > STEP_SMALL) n[d]++; });
+  return { n, dl };
+}
+
+// ---------------------------------------------------------------- episodes (piecewise linear fit, merge, classify)
+function piecewise(x, y) {
+  const n = y.length, cs = new Map();
+  const cost = (i, j) => { const k = i * 100000 + j; let v = cs.get(k); if (v === undefined) { v = (j - i < EP_MINSEG) ? 1e9 : lin(x.slice(i, j), y.slice(i, j))[2]; cs.set(k, v); } return v; };
+  const K = Math.min(EP_KMAX, Math.floor(n / EP_MINSEG));
+  const C = [], B = []; for (let k = 0; k <= K; k++) { C.push(new Float64Array(n + 1).fill(1e18)); B.push(new Int32Array(n + 1)); }
+  C[0][0] = 0;
+  for (let k = 1; k <= K; k++) for (let j = k * EP_MINSEG; j <= n; j++) for (let i = (k - 1) * EP_MINSEG; i <= j - EP_MINSEG; i++) {
+    const v = C[k - 1][i] + cost(i, j); if (v < C[k][j] - 1e-12) { C[k][j] = v; B[k][j] = i; }   // ties (quantised data) go to the earliest break, like the Python run
+  }
+  let j = n; const st = [];
+  for (let kk = K; kk > 0; kk--) { const i = B[kk][j]; st.push(i); j = i; }
+  return st.sort((a, b) => a - b).concat([n]);
+}
+function mergeDev(x, y, a0, m0, b0) {
+  const xa = x.slice(a0, m0), xb = x.slice(m0, b0), la = lin(xa, y.slice(a0, m0)), lb = lin(xb, y.slice(m0, b0)), lm = lin(x.slice(a0, b0), y.slice(a0, b0));
+  let mx = 0;
+  xa.forEach(v => { mx = Math.max(mx, Math.abs((lm[0] * v + lm[1]) - (la[0] * v + la[1]))); });
+  xb.forEach(v => { mx = Math.max(mx, Math.abs((lm[0] * v + lm[1]) - (lb[0] * v + lb[1]))); });
+  return mx;
+}
+function mkfit(x, y, a, b) {
+  const xs = x.slice(a, b), ys = y.slice(a, b), f = lin(xs, ys), my = ys.reduce((s, v) => s + v, 0) / ys.length;
+  let sst = 0; ys.forEach(v => { sst += (v - my) * (v - my); });
+  const r2 = sst > 0 ? 1 - f[2] / sst : 0;
+  return { a, b, slope: f[0], icpt: f[1], r2, sd: Math.sqrt(f[2] / ys.length) };
+}
+function episodes(ch, sr, ok, bdDay, d0, rows) {            // sr: corrected daily values (index = day - d0); ok(day) -> usable
+  const blocks = []; let cur = [];
+  for (let d = bdDay; d < d0 + sr.length; d++) { if (ok(d)) cur.push(d); else { if (cur.length) blocks.push(cur); cur = []; } }
+  if (cur.length) blocks.push(cur);
+  const d2 = [];
+  blocks.forEach(b => { if (b.length >= 3) for (let i = 0; i + 2 < b.length; i++) d2.push(sr[b[i + 2] - d0] - 2 * sr[b[i + 1] - d0] + sr[b[i] - d0]); });
+  let sig = EP_SIG_MIN;
+  if (d2.length) { const m = median(d2), mad = median(d2.map(v => Math.abs(v - m))); sig = Math.max(1.4826 * mad / Math.sqrt(6), EP_SIG_MIN); }
+  const phases = [];
+  blocks.forEach((blk, bi) => {
+    let y = blk.map(d => sr[d - d0]), x = blk.map(d => d - blk[0]), i0 = 0;
+    if (bi > 0 || blk[0] > bdDay + 3) {
+      const dy = []; for (let i = 0; i + 1 < y.length; i++) dy.push(Math.abs(y[i + 1] - y[i]));
+      const lim = Math.max(EP_SETTLE_K * sig, 0.005);
+      for (let i = 0; i < Math.min(y.length - EP_SETTLE_DAYS, EP_SETTLE_MAX + 1); i++) {
+        let all = true; for (let q = i; q < i + EP_SETTLE_DAYS; q++) if (!(dy[q] < lim)) { all = false; break; }
+        if (all) { i0 = i; break; }
+      }
+      if (i0 > 0) phases.push({ ch, start: blk[0], end: blk[i0 - 1], kind: 'settle', n: i0, net: y[i0 - 1] - y[0], r2: NaN, size: null });
+    }
+    const bk = blk.slice(i0); y = y.slice(i0); x = x.slice(i0);
+    if (y.length < EP_MINSEG) return;
+    const bnd = piecewise(x, y); let segs = []; for (let i = 0; i + 1 < bnd.length; i++) segs.push([bnd[i], bnd[i + 1]]);
+    const thr = Math.max(EP_BREAK_MIN, EP_REL_MIN * (Math.max.apply(null, y) - Math.min.apply(null, y)));
+    while (segs.length > 1) {
+      const devs = []; for (let i = 0; i + 1 < segs.length; i++) devs.push(mergeDev(x, y, segs[i][0], segs[i][1], segs[i + 1][1]));
+      let m = 0; for (let i = 1; i < devs.length; i++) if (devs[i] < devs[m] - 1e-12) m = i;
+      if (devs[m] >= thr) break;
+      segs[m] = [segs[m][0], segs[m + 1][1]]; segs.splice(m + 1, 1);
+    }
+    let fits = segs.map(s => mkfit(x, y, s[0], s[1]));
+    const fits2 = [];
+    fits.forEach(f => {
+      const net = f.slope * (x[f.b - 1] - x[f.a]), n_ = f.b - f.a;
+      if (n_ >= 2 * EP_TREND_DAYS && Math.abs(net) >= EP_EV_MIN && f.r2 < EP_TREND_R2) {
+        let best = null;
+        for (let m = f.a + EP_TREND_DAYS; m <= f.b - EP_TREND_DAYS; m++) {
+          const s = lin(x.slice(f.a, m), y.slice(f.a, m))[2] + lin(x.slice(m, f.b), y.slice(m, f.b))[2];
+          if (!best || s < best[0] || (s === best[0] && m < best[1])) best = [s, m];
+        }
+        if (best) {
+          const f1 = mkfit(x, y, f.a, best[1]), f2 = mkfit(x, y, best[1], f.b);
+          if (f1.r2 >= EP_TREND_R2 && f2.r2 >= EP_TREND_R2 && best[0] <= EP_SPLIT_GAIN * lin(x.slice(f.a, f.b), y.slice(f.a, f.b))[2]) { fits2.push(f1, f2); return; }
+        }
+      }
+      fits2.push(f);
+    });
+    fits = fits2;
+    fits.forEach((f, si) => {
+      const span = x[f.b - 1] - x[f.a], net = f.slope * span;
+      let kind;
+      if (f.b - f.a < EP_TREND_DAYS && Math.abs(net) >= EP_EV_MIN) kind = 'event';
+      else if ((f.b - f.a) >= EP_TREND_DAYS && Math.abs(net) >= EP_EV_MIN) kind = f.r2 >= EP_TREND_R2 ? 'trend' : 'wander';
+      else kind = 'stable';
+      if (si > 0) {
+        const pf = fits[si - 1], jump = (f.slope * x[f.a] + f.icpt) - (pf.slope * x[pf.b - 1] + pf.icpt);
+        if (Math.abs(jump) >= EP_EV_MIN) phases.push({ ch, start: bk[f.a], end: bk[f.a], kind: 'step', n: 1, net: jump, r2: NaN, size: jump });
+      }
+      const line = (kind === 'trend' || kind === 'wander' || (kind === 'stable' && f.b - f.a >= EP_MINSEG) || (kind === 'event' && f.r2 >= EP_TREND_R2));
+      phases.push({ ch, start: bk[f.a], end: bk[f.b - 1], kind, n: f.b - f.a, net, r2: f.r2, sd: f.sd, size: null,
+                    slopeDay: f.slope, icpt: f.icpt, x0: bk[f.a] - blk[0], blk0: blk[0], line });
+    });
+  });
+  return phases;
+}
+
+// ---------------------------------------------------------------- whole analysis
+function analyze(stations) {
+  const bdDay = dayOfStr(BASE_DATE), pre = {}, out = {};
+  Object.keys(stations).forEach(k => {
+    const c = cleanTilt(k, stations[k]), fr = dailyFrames(stations[k].xs, c.tc, c.t), from = bdDay - fr.d0, mc = movedCount(fr, c.tc, from);
+    const cd = new Set(); for (let d = from; d < fr.nd; d++) if (mc.n[d] >= STEP_COMMON_N) cd.add(d + fr.d0);
+    pre[k] = { c, fr, from, mc, cd };
+  });
+  Object.keys(pre).forEach(k => {
+    const { c, fr, from, mc } = pre[k], tc = c.tc, other = new Set();
+    Object.keys(pre).forEach(o => { if (o !== k) pre[o].cd.forEach(d => other.add(d)); });
+    const stepsMed = [];
+    for (let d = from; d < fr.nd; d++) {
+      const common = mc.n[d] >= STEP_COMMON_N, shared = other.has(d + fr.d0);
+      tc.forEach(ch => {
+        const v = mc.dl[ch][d]; if (v !== v) return;
+        if (Math.abs(v) > STEP_SMALL && (common || shared)) stepsMed.push({ d: d + fr.d0, ch, v, kind: 'common' });
+        else if (Math.abs(v) > STEP_SINGLE) stepsMed.push({ d: d + fr.d0, ch, v, kind: 'single' });
+      });
+    }
+    const mean = fr.mean, prevVal = (ch, d) => { for (let q = d - 1; q >= from; q--) if (mean[ch][q] === mean[ch][q]) return mean[ch][q]; return NaN; };
+    const steps = stepsMed.map(s => { const i = s.d - fr.d0, pv = prevVal(s.ch, i); return { d: s.d, ch: s.ch, v: (mean[s.ch][i] === mean[s.ch][i] && pv === pv) ? mean[s.ch][i] - pv : s.v, kind: s.kind }; });
+    (VISIT_STEPS[k] || []).forEach(vs => {
+      const vd = dayOfStr(vs), have = new Set(steps.map(s => s.d + '|' + s.ch));
+      tc.forEach(ch => { const i = vd - fr.d0, pv = prevVal(ch, i); if (mean[ch][i] === mean[ch][i] && pv === pv && !have.has(vd + '|' + ch)) { const dv = mean[ch][i] - pv; if (Math.abs(dv) > VISIT_STEP_MIN) steps.push({ d: vd, ch, v: dv, kind: 'visit' }); } });
+    });
+    if (GAP_CONT_DAYS) {
+      const have = new Set(steps.map(s => s.d + '|' + s.ch));
+      tc.forEach(ch => {
+        let prev = -1;
+        for (let d = from; d < fr.nd; d++) {
+          if (mean[ch][d] !== mean[ch][d]) continue;
+          if (prev >= 0) { const miss = d - prev - 1; if (miss >= GAP_CONT_DAYS && !have.has((d + fr.d0) + '|' + ch)) steps.push({ d: d + fr.d0, ch, v: mean[ch][d] - mean[ch][prev], kind: 'gap(' + miss + ')' }); }
+          prev = d;
+        }
+      });
+    }
+    const base = {}; tc.forEach(ch => { let s = 0, n = 0; for (let d = from; d < from + BASE_NDAYS; d++) if (mean[ch][d] === mean[ch][d]) { s += mean[ch][d]; n++; } base[ch] = n ? s / n : NaN; });
+    const corr = {}; tc.forEach(ch => {
+      const a = new Float64Array(fr.nd).fill(NaN);
+      for (let d = from; d < fr.nd; d++) { let off = 0; steps.forEach(s => { if (s.ch === ch && s.d - fr.d0 <= d) off += s.v; }); a[d] = mean[ch][d] - base[ch] - off; }
+      corr[ch] = a;
+    });
+    const phases = [], lines = [];
+    tc.forEach(ch => {
+      const stepDays = new Set(steps.filter(s => s.ch === ch).map(s => s.d));
+      const ok = d => d >= bdDay && corr[ch][d - fr.d0] === corr[ch][d - fr.d0] && fr.cnt[ch][d - fr.d0] >= MIN_MIN_VALID && !stepDays.has(d);
+      episodes(ch, corr[ch], ok, bdDay, fr.d0, null).forEach(p => phases.push(p));
+    });
+    out[k] = { tc, d0: fr.d0, nd: fr.nd, bdDay, dm: fr.med, dmean: fr.mean, cnt: fr.cnt, corr, base, steps, phases, frozen: pre[k].c.frozen, nAllZero: pre[k].c.nAllZero };
+  });
+  return out;
+}
+const SPEED = [[0.004, 'ช้ามาก'], [0.04, 'ช้า'], [0.4, 'ปานกลาง'], [Infinity, 'เร็ว']];
+function speedOf(slopePerHour) { const a = Math.abs(slopePerHour); for (const s of SPEED) if (a < s[0]) return s[1]; return 'เร็ว'; }
+
+const api = { _t: { piecewise, mergeDev, lin }, analyze, speedOf, dayOfStr, dayLabel, epochOfLocal, cleanTilt, dailyFrames, CONST: { BASE_DATE, EP_TREND_R2, EP_TREND_DAYS, EP_EV_MIN } };
+if (typeof module !== 'undefined' && module.exports) module.exports = api; else root.PSWTrends = api;
+})(typeof window !== 'undefined' ? window : globalThis);
+
+/* "Auto trend lines (slide method)": step-corrected daily tilt + piecewise trend lines, speed classes and a table - the same analysis as the slides (see trends.js). */
+(function(){
+const COL = { 'ช้ามาก': '#2E8B57', 'ช้า': '#C99A1B', 'ปานกลาง': '#E8751A', 'เร็ว': '#C62828' };
+const KIND = { trend: 'แนวโน้ม', wander: 'แนวโน้มไม่สม่ำเสมอ', stable: 'นิ่ง', event: 'เหตุการณ์ช่วงสั้น', step: 'ขั้น (step)', settle: 'ปรับตัวหลังรีสตาร์ท' };
+const STEPK = { common: 'หลายช่องพร้อมกัน', single: 'ช่องเดียวกระโดดผิดปกติ', visit: 'เข้าซ่อมหน้างาน (ผู้ใช้แจ้ง)' };
+let R = null, sel = { st: null, ch: null }, plot = null, ov = null;
+function el(tag, cls, txt){ const e = document.createElement(tag); if (cls) e.className = cls; if (txt != null) e.textContent = txt; return e; }
+function compute(){
+  if (R) return R;
+  const input = {}; STATIONS.forEach(st => { input[st.id] = { xs: st.xs, CH: st.CH }; });
+  R = PSWTrends.analyze(input); return R;
+}
+function isLine(p){ return p.slopeDay !== undefined && (p.kind === 'trend' || p.kind === 'wander' || (p.kind === 'stable' && p.n >= 5) || (p.kind === 'event' && p.r2 >= 0.7)); }
+function perH(p){ return p.slopeDay / 24; }
+function fmtS(v){ return (v >= 0 ? '+' : '−') + Math.abs(v).toFixed(Math.abs(v) < 0.001 ? 5 : 4); }
+function dayEpoch(d){ return d * 86400 - 25200; }
+function css(n){ return getComputedStyle(document.documentElement).getPropertyValue(n).trim() || '#888'; }
+
+function build(){
+  ov = el('div', 'tr-ov'); ov.id = 'tr-ov'; ov.hidden = true;
+  const pn = el('div', 'tr-panel'); ov.appendChild(pn);
+  ov.addEventListener('click', e => { if (e.target === ov) close(); });
+  window.addEventListener('keydown', e => { if (e.key === 'Escape' && !ov.hidden) close(); });
+  pn.innerHTML =
+    '<div class="tr-head"><h2>Auto trend lines · เส้นแนวโน้มวิธีเดียวกับสไลด์</h2><button class="tr-x" type="button" aria-label="close">×</button></div>' +
+    '<div class="tr-ctl" id="tr-ctl"></div><div class="tr-chart" id="tr-chart"></div><div class="tr-leg" id="tr-leg"></div>' +
+    '<div class="tr-grid"><div><h3>ช่วงของช่องที่เลือก</h3><div class="tr-tw" id="tr-ph"></div></div><div><h3>ทุกช่องของสถานี</h3><div class="tr-tw" id="tr-all"></div></div></div>' +
+    '<details class="tr-note"><summary>วิธีคำนวณ (ตรงกับสไลด์)</summary><div id="tr-method"></div></details>';
+  pn.querySelector('.tr-x').onclick = close;
+  document.body.appendChild(ov);
+}
+function close(){ ov.hidden = true; document.body.classList.remove('tr-open'); if (plot){ plot.destroy(); plot = null; } }
+function open(){
+  if (!ov) build();
+  const r = compute();
+  if (!sel.st || !r[sel.st]) sel.st = (typeof activeStation !== 'undefined' && r[activeStation]) ? activeStation : Object.keys(r)[0];
+  if (!sel.ch || r[sel.st].tc.indexOf(sel.ch) < 0) sel.ch = r[sel.st].tc[0];
+  ov.hidden = false; document.body.classList.add('tr-open');
+  render();
+}
+function render(){
+  const r = compute(), S = r[sel.st];
+  const ctl = document.getElementById('tr-ctl'); ctl.innerHTML = '';
+  Object.keys(r).forEach(k => { const b = el('button', 'tr-b' + (k === sel.st ? ' on' : ''), STATIONS.find(s => s.id === k).label); b.type = 'button'; b.onclick = () => { sel.st = k; if (r[k].tc.indexOf(sel.ch) < 0) sel.ch = r[k].tc[0]; render(); }; ctl.appendChild(b); });
+  const cs = el('select'); cs.setAttribute('aria-label', 'channel');
+  S.tc.forEach(c => cs.add(new Option(c, c))); cs.value = sel.ch; cs.onchange = () => { sel.ch = cs.value; render(); }; ctl.appendChild(cs);
+  const info = el('span', 'tr-info', 'ข้อมูลถึง ' + PSWTrends.dayLabel(S.d0 + S.nd - 1) + ' · ฐาน = ค่าเฉลี่ย 3 วันแรกตั้งแต่ ' + PSWTrends.CONST.BASE_DATE); ctl.appendChild(info);
+  drawChart(S); fillTables(S);
+  document.getElementById('tr-leg').innerHTML = ['ช้ามาก <0.004', 'ช้า 0.004–0.04', 'ปานกลาง 0.04–0.4', 'เร็ว >0.4'].map(t => '<span><i style="background:' + COL[t.split(' ')[0]] + '"></i>' + t + ' °/ชม.</span>').join('') +
+    '<span><i class="tr-step"></i>ขั้นที่หักออก (step)</span><span><i class="tr-set"></i>ปรับตัวหลังรีสตาร์ท</span><span><i class="tr-gap"></i>ไม่มีข้อมูล</span>';
+  document.getElementById('tr-method').innerHTML =
+    'ล้างข้อมูลรายนาที (|tilt| &lt; 45°, นาทีที่ ≥70% ของช่องอ่านเป็น 0 = logger ดับ, ช่องอนาล็อกตัดค่ากระโดด, เซนเซอร์แช่แข็ง) → ค่ารายวัน (มัธยฐาน/ค่าเฉลี่ยในช่วง ±0.2°) → หักขั้น (หลายช่อง &gt;0.5° พร้อมกัน, ช่องเดียว &gt;5°, เข้าซ่อม 10 ต.ค. ST2, ต่อเนื่องหลังข้อมูลขาด ≥2 วัน) → ลบฐาน 3 วันแรก → ' +
+    'ตัดเป็นช่วงที่มีข้อมูล → fit เส้นตรงหลายช่วง (สั้นสุด 5 วัน, ≤8 ช่วง) → รวมช่วงที่ต่างกันน้อยกว่า max(0.02°, 10% ของพิสัย) → จัดกลุ่ม: แนวโน้ม (≥10 วัน, |เปลี่ยน| ≥0.02°, R² ≥0.7), ไม่สม่ำเสมอ, นิ่ง, เหตุการณ์ (5–9 วัน) → ความเร็วตามเกณฑ์ Sheikh et al. 2021.<br>' +
+    'ตรวจเทียบกับสคริปต์ Python ที่ใช้ทำสไลด์ด้วยข้อมูลชุดเดียวกัน (ถึง 3 พ.ย. 2569): ค่ารายวันหลังหักขั้นต่างกัน ≤ 3×10⁻¹³°, ขั้น 39/39 ตรงกัน, ช่วง 197/197 ตรงกัน.';
+}
+function drawChart(S){
+  const holder = document.getElementById('tr-chart'); if (plot){ plot.destroy(); plot = null; } holder.innerHTML = '';
+  const ch = sel.ch, corr = S.corr[ch], xs = [], ys = [];
+  for (let d = S.bdDay - S.d0; d < S.nd; d++){ xs.push(dayEpoch(d + S.d0)); ys.push(corr[d] === corr[d] ? corr[d] : null); }
+  const ph = S.phases.filter(p => p.ch === ch), steps = S.steps.filter(s => s.ch === ch);
+  const lines = ph.filter(isLine).sort((a, b) => a.start - b.start);
+  const ink = css('--ink-2'), grid = css('--line-soft');
+  const hook = u => {
+    const { ctx } = u, dpr = devicePixelRatio || 1, L = u.bbox.left, T = u.bbox.top, W = u.bbox.width, H = u.bbox.height;
+    ctx.save(); ctx.beginPath(); ctx.rect(L, T, W, H); ctx.clip();
+    const X = d => u.valToPos(dayEpoch(d), 'x', true), Y = v => u.valToPos(v, 'y', true);
+    // no-data stretches (usable day missing) as red hatch
+    let gs = null; const pat = (typeof gapPattern === 'function') ? gapPattern(ctx, dpr) : null;
+    for (let d = S.bdDay; d <= S.d0 + S.nd; d++){
+      const miss = d < S.d0 + S.nd && !(corr[d - S.d0] === corr[d - S.d0]);
+      if (miss && gs === null) gs = d;
+      if (!miss && gs !== null){ const x1 = X(gs), x2 = X(d); ctx.fillStyle = 'rgba(178,58,42,0.08)'; ctx.fillRect(x1, T, x2 - x1, H); if (pat){ ctx.fillStyle = pat; ctx.fillRect(x1, T, x2 - x1, H); } gs = null; }
+    }
+    ph.filter(p => p.kind === 'settle').forEach(p => { const x1 = X(p.start), x2 = X(p.end + 1); ctx.fillStyle = 'rgba(120,130,140,0.22)'; ctx.fillRect(x1, T, x2 - x1, H); });
+    ctx.font = (10 * dpr) + 'px "IBM Plex Mono", monospace'; ctx.textBaseline = 'top';
+    steps.forEach(s => {
+      const x = X(s.d); ctx.strokeStyle = 'rgba(178,58,42,0.9)'; ctx.setLineDash([4 * dpr, 3 * dpr]); ctx.lineWidth = 1.2 * dpr; ctx.beginPath(); ctx.moveTo(x, T); ctx.lineTo(x, T + H); ctx.stroke(); ctx.setLineDash([]);
+      ctx.fillStyle = 'rgba(178,58,42,1)'; ctx.fillText('step ' + (s.v >= 0 ? '+' : '−') + Math.abs(s.v).toFixed(2) + '°', x + 3 * dpr, T + 3 * dpr);
+    });
+    const tags = [];
+    lines.forEach(p => {
+      const c = COL[PSWTrends.speedOf(perH(p))], x0 = p.start - p.blk0, x1 = p.end - p.blk0;
+      const a = Y(p.slopeDay * x0 + p.icpt), b = Y(p.slopeDay * x1 + p.icpt);
+      ctx.strokeStyle = css('--panel'); ctx.lineWidth = 5 * dpr; ctx.globalAlpha = .8; ctx.beginPath(); ctx.moveTo(X(p.start), a); ctx.lineTo(X(p.end), b); ctx.stroke(); ctx.globalAlpha = 1;
+      ctx.strokeStyle = c; ctx.lineWidth = 2.6 * dpr; ctx.beginPath(); ctx.moveTo(X(p.start), a); ctx.lineTo(X(p.end), b); ctx.stroke();
+      if (X(p.end) - X(p.start) > 70 * dpr) tags.push({ x: (X(p.start) + X(p.end)) / 2, y: (a + b) / 2, c, t: fmtS(perH(p)) + ' °/h' });
+    });
+    ctx.textAlign = 'center'; ctx.textBaseline = 'bottom'; ctx.font = 'bold ' + (10 * dpr) + 'px "IBM Plex Mono", monospace';
+    tags.sort((p, q) => p.x - q.x).forEach((t, i) => { const w = ctx.measureText(t.t).width + 8 * dpr, y = t.y - (8 + (i % 2) * 14) * dpr; ctx.fillStyle = t.c; ctx.fillRect(t.x - w / 2, y - 12 * dpr, w, 14 * dpr); ctx.fillStyle = '#fff'; ctx.fillText(t.t, t.x, y + 1 * dpr); });
+    ctx.restore();
+  };
+  const opts = {
+    width: holder.clientWidth || 900, height: 360, tzDate: ts => uPlot.tzDate(new Date(ts * 1e3), 'Asia/Bangkok'),
+    scales: { x: { time: true }, y: { auto: true } }, legend: { show: false }, cursor: { drag: { x: false, y: false } },
+    axes: [{ stroke: ink, grid: { stroke: grid, width: 1 }, ticks: { stroke: grid }, label: 'วันที่ (เวลาไทย)', labelSize: 18, font: '11px "IBM Plex Mono", monospace', labelFont: 'bold 12px "IBM Plex Sans", sans-serif' },
+           { stroke: ink, grid: { stroke: grid, width: 1 }, ticks: { stroke: grid }, size: 60, label: 'ค่าเอียงสะสมหลังหักขั้น (°)', labelFont: 'bold 12px "IBM Plex Sans", sans-serif', font: '11px "IBM Plex Mono", monospace' }],
+    series: [{}, { label: ch, stroke: css('--ink-3'), width: 1, points: { show: true, size: 4, fill: css('--ink-3') }, spanGaps: false }], hooks: { draw: [hook] }
+  };
+  plot = new uPlot(opts, [xs, ys], holder);
+}
+function fillTables(S){
+  const ch = sel.ch, rows = S.phases.filter(p => p.ch === ch).sort((a, b) => a.start - b.start || (a.kind === 'step' ? -1 : 1));
+  let h = '<table><thead><tr><th>ประเภท</th><th>จาก</th><th>ถึง</th><th>วัน</th><th>เปลี่ยน (°)</th><th>ความชัน (°/ชม.)</th><th>ระดับ</th><th>R²</th></tr></thead><tbody>';
+  rows.forEach(p => {
+    const hasS = isLine(p), sp = hasS ? PSWTrends.speedOf(perH(p)) : '';
+    h += '<tr><td>' + (KIND[p.kind] || p.kind) + '</td><td>' + PSWTrends.dayLabel(p.start) + '</td><td>' + PSWTrends.dayLabel(p.end) + '</td><td>' + p.n + '</td><td>' + (p.net >= 0 ? '+' : '−') + Math.abs(p.net).toFixed(3) + '</td><td>' + (hasS ? fmtS(perH(p)) : '') + '</td><td>' + (hasS ? '<span class="tr-pill" style="background:' + COL[sp] + '">' + sp + '</span>' : '') + '</td><td>' + (p.r2 === p.r2 && p.r2 != null ? p.r2.toFixed(2) : '') + '</td></tr>';
+  });
+  const st = S.steps.filter(s => s.ch === ch);
+  if (st.length){ h += '<tr class="tr-sep"><td colspan="8">ขั้นที่หักออกของช่องนี้</td></tr>'; st.sort((a, b) => a.d - b.d).forEach(s => { h += '<tr><td>step</td><td colspan="2">' + PSWTrends.dayLabel(s.d) + '</td><td></td><td>' + (s.v >= 0 ? '+' : '−') + Math.abs(s.v).toFixed(3) + '</td><td colspan="3">' + (STEPK[s.kind] || (s.kind.indexOf('gap') === 0 ? 'ต่อเนื่องหลังข้อมูลขาด ' + s.kind.slice(4, -1) + ' วัน' : s.kind)) + '</td></tr>'; }); }
+  document.getElementById('tr-ph').innerHTML = h + '</tbody></table>';
+  let a = '<table><thead><tr><th>ช่อง</th><th>เส้น</th><th>เร็วสุด (°/ชม.)</th><th>ระดับ</th><th>ขั้น</th></tr></thead><tbody>';
+  S.tc.forEach(c => {
+    const ls = S.phases.filter(p => p.ch === c && isLine(p)); let fast = null; ls.forEach(p => { if (!fast || Math.abs(p.slopeDay) > Math.abs(fast.slopeDay)) fast = p; });
+    const sp = fast ? PSWTrends.speedOf(perH(fast)) : '';
+    a += '<tr class="tr-row' + (c === sel.ch ? ' on' : '') + '" data-ch="' + c + '"><td><b>' + c + '</b></td><td>' + ls.length + '</td><td>' + (fast ? fmtS(perH(fast)) : '') + '</td><td>' + (fast ? '<span class="tr-pill" style="background:' + COL[sp] + '">' + sp + '</span>' : '') + '</td><td>' + S.steps.filter(s => s.ch === c).length + '</td></tr>';
+  });
+  const box = document.getElementById('tr-all'); box.innerHTML = a + '</tbody></table>';
+  box.querySelectorAll('.tr-row').forEach(r => r.onclick = () => { sel.ch = r.dataset.ch; render(); });
+}
+window.PSWTrendsUI = { open, close, compute, get result(){ return R; } };
+})();
+
+</script><!--TRENDS-JS:END-->
 </body></html>
