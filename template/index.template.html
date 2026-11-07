@@ -1732,6 +1732,27 @@ function drawGapBandsHook(getIdx){
     ctx.restore();
   };
 }
+// Robust automatic y range for tilt charts: logger-restart garbage (thousands of "degrees", e.g. ST2 on 9 Oct) is ignored and,
+// on long views, the lowest/highest 1 % are left out so a few excursions do not squash the data. Values outside simply run off the plot.
+// Short views (< 20 000 samples) show the true min/max of the plausible values.
+function robustExtent(u, spec, nSeries, degForce){
+  const xs = u.data[0]; if (!xs || !xs.length) return null;
+  const x0 = u.scales.x.min != null ? u.scales.x.min : xs[0], x1 = u.scales.x.max != null ? u.scales.x.max : xs[xs.length - 1];
+  const i0 = lowerBound(xs, x0, 0, xs.length), i1 = Math.min(xs.length, lowerBound(xs, x1, 0, xs.length) + 1);
+  const deg = degForce != null ? degForce : (spec && trendUnitFor(spec) === '°'), vals = [], step = Math.max(1, Math.floor((i1 - i0) / 6000));
+  let mn = Infinity, mx = -Infinity, total = 0;
+  for (let k = 1; k <= nSeries; k++){
+    const s = u.series[k]; if (!s || s.show === false || !u.data[k]) continue;
+    const a = u.data[k];
+    for (let i = i0; i < i1; i += step){ const y = a[i]; if (y == null || y !== y || (deg && Math.abs(y) > 45)) continue; vals.push(y); if (y < mn) mn = y; if (y > mx) mx = y; }
+    total += (i1 - i0);
+  }
+  if (vals.length < 20) return mn <= mx ? [mn, mx] : null;
+  if (total < 20000) return [mn, mx];
+  const s = Float64Array.from(vals).sort(), lo = s[Math.floor(s.length * 0.01)], hi = s[Math.min(s.length - 1, Math.ceil(s.length * 0.99))];
+  const pad = Math.max(0.12 * (hi - lo), 0.05);
+  return [lo - pad * 0.3, hi + pad * 0.3];
+}
 // min/max of the original (pre-splice) readings in view, so the y axis also makes room for the faint dashed copy
 function ghostExtent(u, spec){
   const cfg = shiftStore[spec.id], chOwner = spec.primary && spec.primary.chOwner;
@@ -1744,9 +1765,10 @@ function ghostExtent(u, spec){
   Object.keys(first).forEach(nm => {
     const k = seriesIdxByName(u, nm); if (k < 1 || u.series[k].show === false) return;
     const raw = chOwner.CH[nm]; if (!raw) return;
+    const roff = (REL_MODE && isTiltCh(nm)) ? relOffsets(chOwner, nm) : null;
     const i0 = lowerBound(xs, Math.max(first[nm], x0), 0, xs.length), i1 = Math.min(xs.length, lowerBound(xs, x1, 0, xs.length) + 1);
     const step = Math.max(1, Math.floor((i1 - i0) / 6000));
-    for (let i = i0; i < i1; i += step){ const y = raw[i]; if (y !== y || (deg && Math.abs(y) > 45)) continue; if (y < lo) lo = y; if (y > hi) hi = y; }
+    for (let i = i0; i < i1; i += step){ const y0 = raw[i]; if (y0 !== y0 || (deg && Math.abs(y0) > 45)) continue; const y = roff ? y0 - roff[i] : y0; if (y < lo) lo = y; if (y > hi) hi = y; }
   });
   return lo <= hi ? [lo, hi] : null;
 }
@@ -1768,11 +1790,12 @@ function drawGhostHook(spec, chOwner){
     Object.keys(first).forEach(nm => {
       const k = seriesIdxByName(u, nm); if (k < 1 || u.series[k].show === false) return;
       const raw = chOwner.CH[nm]; if (!raw) return;
+      const roff = (REL_MODE && isTiltCh(nm)) ? relOffsets(chOwner, nm) : null;
       const st = u.series[k].stroke; ctx.strokeStyle = typeof st === 'function' ? st(u, k) : (st || '#888');
       let lastX = -1e9, pen = false; ctx.beginPath();
       for (let i = lowerBound(xs, first[nm], 0, xs.length); i < xs.length; i++){
-        const y = raw[i];
-        if (y !== y || (deg && Math.abs(y) > 45)){ pen = false; continue; }
+        const y0 = raw[i], y = roff ? y0 - roff[i] : y0;
+        if (y0 !== y0 || (deg && Math.abs(y0) > 45)){ pen = false; continue; }
         const px = u.valToPos(xs[i], 'x', true);
         if (px > left + width + 2) break;
         if (px < left - 2){ continue; }
@@ -1837,6 +1860,35 @@ function findStepCandidates(chOwner, names, minStep){
   });
   events.sort((x, y) => y.maxAbs - x.maxAbs);
   return events;
+}
+// "relative" display of tilt charts: every tilt channel minus its own baseline (median of 27-29 Jun), like the slides, so small movements are visible
+var REL_MODE = false;
+try { REL_MODE = localStorage.getItem('psw_relzero_v1') === '1'; } catch(e){}
+const REL_OFF = new Map();
+// per-sample offset = baseline + cumulative steps removed, exactly the slide method (PSWTrends): baseline = mean of the first 3 days from 27 Jun,
+// steps = visits / resets / faults found by the slide rules. Falls back to a simple baseline if the analysis is not available.
+function relOffsets(chOwner, nm){
+  const key = (chOwner.id || '') + '|' + nm;
+  if (REL_OFF.has(key)) return REL_OFF.get(key);
+  const xs = chOwner.xs, n = xs.length, off = new Float32Array(n);
+  let base = 0, steps = [];
+  try {
+    const R = window.PSWTrendsUI && PSWTrendsUI.compute && PSWTrendsUI.compute();
+    const S = R && R[chOwner.id];
+    if (S && S.base[nm] === S.base[nm]){ base = S.base[nm]; steps = S.steps.filter(s => s.ch === nm).sort((p, q) => p.d - q.d); }
+  } catch(e){}
+  let si = 0, cum = 0;
+  for (let i = 0; i < n; i++){
+    const d = Math.floor((xs[i] + 25200) / 86400);
+    while (si < steps.length && steps[si].d <= d){ cum += steps[si].v; si++; }
+    off[i] = base + cum;
+  }
+  REL_OFF.set(key, off); return off;
+}
+function isTiltCh(nm){ return /^tilt_\d+(_[xy])?$/.test(nm); }
+function setRelMode(on){
+  REL_MODE = !!on; try { localStorage.setItem('psw_relzero_v1', on ? '1' : '0'); } catch(e){}
+  charts.forEach(c => { if (c.rebuild) c.rebuild(); });
 }
 // ==== end TOOLS-PATCH:v1 ====
 // ==== TOOLS-PATCH:v2 : tilt status by the slide criteria (speed class of the 7-day trend + sudden steps) ====
@@ -3723,7 +3775,7 @@ function filteredChannelCount(chartId){
   Object.keys(r).forEach(nm => { if (rangeActive(r[nm])) s.add(nm); });
   return s.size;
 }
-function computeChannelSeries(chOwner, nm, filterOn, shiftCfg, rangeCfg){
+function computeChannelSeriesBase(chOwner, nm, filterOn, shiftCfg, rangeCfg){
   const fault = chOwner.FAULT && chOwner.FAULT[nm];
   let arr = (filterOn && fault) ? maskFaultNaN(chOwner.CH[nm], fault) : chOwner.CH[nm];
   if (rangeActive(rangeCfg)) arr = maskOutsideRange(arr, rangeCfg);
@@ -3738,6 +3790,13 @@ function computeChannelSeries(chOwner, nm, filterOn, shiftCfg, rangeCfg){
     for (let i = lowerBound(xs, sp.t, 0, xs.length); i < xs.length; i++) out[i] += add;
     const rec = SPLICE_ADD.get(sp) || {}; rec[nm] = add; SPLICE_ADD.set(sp, rec);
   });
+  return out;
+}
+function computeChannelSeries(chOwner, nm, filterOn, shiftCfg, rangeCfg){
+  const a = computeChannelSeriesBase(chOwner, nm, filterOn, shiftCfg, rangeCfg);
+  if (!REL_MODE || !isTiltCh(nm)) return a;
+  const off = relOffsets(chOwner, nm), out = new Float64Array(a.length);
+  for (let i = 0; i < a.length; i++) out[i] = a[i] - off[i];
   return out;
 }
 function clearShiftFromChart(u, chOwner, primaryNames, chartId){
@@ -4766,6 +4825,7 @@ function makeChartNow(spec){
   if (!spec.primary.range){
     scales.y.range = (u, dMin, dMax) => {
       let lo = dMin, hi = dMax;
+      if (/tilt/i.test((spec.primary && spec.primary.label) || '')){ const r = robustExtent(u, spec, primaryNames.length); if (r){ lo = r[0]; hi = r[1]; } }
       const g = ghostExtent(u, spec);
       if (g){ lo = lo == null ? g[0] : Math.min(lo, g[0]); hi = hi == null ? g[1] : Math.max(hi, g[1]); }
       if (lo == null || hi == null) return [0, 100];
@@ -4841,7 +4901,17 @@ function makeChartNow(spec){
   };
 
   const u = newUPlot(opts, data, holder);
-  charts.push({ u, wrap, hasSecondary, section: spec.section, id: spec.id });
+  const chartEntry = { u, wrap, hasSecondary, section: spec.section, id: spec.id };
+  if (spec.primary && spec.primary.chOwner && /^tilt \(/i.test((spec.primary && spec.primary.label) || '')){
+    const origLabel = spec.primary.label;
+    chartEntry.rebuild = () => {
+      rebuildPrimaryData(u, spec.primary.chOwner, primaryNames, spec.id);
+      if (u.scales.y._rangeOrig === undefined) setScaleAuto(u, 'y');
+      u.axes[1].label = REL_MODE ? 'Tilt change, steps removed (°)' : origLabel; u.redraw();
+    };
+  }
+  charts.push(chartEntry);
+  if (REL_MODE && chartEntry.rebuild) chartEntry.rebuild();
   attachTouchGestures(u);
   applyCurXToNewChart(u);
 
@@ -5297,7 +5367,13 @@ function compareAxisRange(key, names, st){
   if (key === 'rain') return (u, dMin, dMax) => [0, dMax > 0 ? dMax * 1.12 : 1];
   if (key === 'tiltrate') return makeRobustRangeFn(names, st, st.xs, 10, 0.02);
   if (key === 'soilm'){ const r = robustRange(names, st, 8); return r ? ((u, dMin, dMax) => r) : undefined; }
-  return undefined; // raw tilt: full auto, same as the Sensor Readings tilt chart
+  if (key === 'tilt') return (u, dMin, dMax) => {
+    const r = robustExtent(u, null, u.series.length - 1, true);
+    const lo = r ? r[0] : dMin, hi = r ? r[1] : dMax;
+    if (lo == null || hi == null) return [0, 100];
+    return uPlot.rangeNum(lo, hi, { min: { mode: 3, pad: 0.1 }, max: { mode: 3, pad: 0.1 } });
+  };
+  return undefined;
 }
 
 function makeCompareChartNow(st){
@@ -7973,6 +8049,10 @@ function init(){
   btn(gFit, '', 'Measure rate', () => chartTool('measure'), 'rate of change in degrees per hour over the zoomed window');
   const gSlide = grp(anaB, 'Slide method');
   btn(gSlide, '', 'Auto trend lines', () => { if (window.PSWTrendsUI) PSWTrendsUI.open(); }, 'step-corrected daily tilt with piecewise trend lines, speed classes and a table - the same analysis as the slides');
+  const gRel = grp(anaB, 'Tilt view');
+  const rl = el('label', 'rb-ctl'); const rcb = document.createElement('input'); rcb.type = 'checkbox'; rcb.checked = !!REL_MODE;
+  rl.title = 'show every tilt channel the way the slides do: minus its own baseline (mean of the first 3 days from 27 Jun) and with the visit / reset / fault steps removed, so small movements are visible without rescaling. Do not also splice the same steps by hand';
+  rl.append(rcb, document.createTextNode(' zeroed, steps removed (like the slides)')); rcb.onchange = () => setRelMode(rcb.checked); gRel.appendChild(rl);
   const gCh = grp(anaB, 'Chart');
   btn(gCh, '', 'Chart height', () => chartTool('size'), 'make the chart under the mouse taller or shorter');
 

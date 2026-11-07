@@ -129,6 +129,10 @@ function init(){
   btn(gFit, '', 'Measure rate', () => chartTool('measure'), 'rate of change in degrees per hour over the zoomed window');
   const gSlide = grp(anaB, 'Slide method');
   btn(gSlide, '', 'Auto trend lines', () => { if (window.PSWTrendsUI) PSWTrendsUI.open(); }, 'step-corrected daily tilt with piecewise trend lines, speed classes and a table - the same analysis as the slides');
+  const gRel = grp(anaB, 'Tilt view');
+  const rl = el('label', 'rb-ctl'); const rcb = document.createElement('input'); rcb.type = 'checkbox'; rcb.checked = !!REL_MODE;
+  rl.title = 'show every tilt channel the way the slides do: minus its own baseline (mean of the first 3 days from 27 Jun) and with the visit / reset / fault steps removed, so small movements are visible without rescaling. Do not also splice the same steps by hand';
+  rl.append(rcb, document.createTextNode(' zeroed, steps removed (like the slides)')); rcb.onchange = () => setRelMode(rcb.checked); gRel.appendChild(rl);
   const gCh = grp(anaB, 'Chart');
   btn(gCh, '', 'Chart height', () => chartTool('size'), 'make the chart under the mouse taller or shorter');
 
