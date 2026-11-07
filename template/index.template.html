@@ -1915,7 +1915,7 @@ const DECK_CL = new Map();
 function deckClusters(st){
   const T = st.xs[st.n - 1], key = st.id + '|' + T;
   if (DECK_CL.has(key)) return DECK_CL.get(key);
-  const xs = st.xs, i0 = lowerBound(xs, T - 8 * 86400, 0, xs.length), i1 = st.n;
+  const xs = st.xs, i0 = lowerBound(xs, T - 14 * 86400, 0, xs.length), i1 = st.n;   // 14 d so a visit seen at the other station is still found
   const names = group(st, 'tilt'), W = 10, res = {}, evAll = [], idxOf = {};
   names.forEach(nm => {
     const arr = st.CH[nm]; if (!arr) return;
@@ -1951,7 +1951,7 @@ function deckStation(st){
     const arr = st.CH[nm]; if (!arr || !idxOf[nm]) return;
     const mine = clusters.filter(c => !c.multi && c.items.some(e => e.nm === nm)).map(c => c.items.filter(e => e.nm === nm).sort((a, b) => Math.abs(b.d) - Math.abs(a.d))[0]);
     const lastLevel = mine.length ? mine[mine.length - 1] : null;                         // any >= 0.1 deg level change of this channel (also across a data gap)
-    const step = mine.filter(e => e.gapMin <= 5 && Math.abs(e.d) >= 0.25).pop() || null;   // sudden step: within the 1-minute sampling, >= 0.25 deg
+    const step = mine.filter(e => e.gapMin <= 5 && Math.abs(e.d) >= 0.25 && e.t >= T - 7 * 86400).pop() || null;   // sudden step: within the 1-minute sampling, >= 0.25 deg
     const wStart = Math.max(T - 7 * 86400, lastMulti ? lastMulti.t1 + 86400 : 0, lastLevel ? lastLevel.t + 3600 : 0);
     const hourly = new Map();
     idxOf[nm].forEach(i => { if (xs[i] < wStart) return; const h = Math.floor((xs[i] - wStart) / 3600); (hourly.get(h) || hourly.set(h, []).get(h)).push(arr[i]); });
