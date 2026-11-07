@@ -1,0 +1,45 @@
+/* Station-map landing page (home). The dashboard (#app) stays laid out at full width while hidden, so charts keep their size. */
+body.home-on #app{visibility:hidden;height:0;overflow:hidden;margin:0;padding:0}
+body:not(.home-on) #home{display:none}
+#home{margin:0 0 18px}
+.hm-head{display:flex;flex-wrap:wrap;align-items:baseline;gap:6px 14px;margin:0 0 10px}
+.hm-head h2{margin:0;font:600 17px "IBM Plex Sans",sans-serif;color:var(--ink)}
+.hm-head .hm-sub{font:12.5px "IBM Plex Sans",sans-serif;color:var(--ink-3)}
+.hm-grid{display:grid;grid-template-columns:minmax(0,1fr) 340px;gap:12px;align-items:start}
+@media (max-width:900px){.hm-grid{grid-template-columns:minmax(0,1fr)}}
+.hm-card{background:var(--panel);border:1px solid var(--line);border-radius:8px;box-shadow:var(--shadow);min-width:0}
+#hm-map{height:min(68vh,640px);min-height:380px;border-radius:8px;background:var(--panel-2)}
+.hm-mapwrap{padding:6px}
+.hm-fallback{display:none;padding:18px;font:13px "IBM Plex Sans",sans-serif;color:var(--ink-3)}
+.hm-list{display:flex;flex-direction:column}
+.hm-list h3{margin:0;padding:10px 12px 6px;font:600 11px "IBM Plex Mono",monospace;letter-spacing:.06em;text-transform:uppercase;color:var(--ink-3)}
+.hm-st{display:block;width:100%;text-align:left;border:0;border-top:1px solid var(--line-soft);background:transparent;padding:10px 12px;cursor:pointer;color:var(--ink);font:inherit}
+.hm-st:hover,.hm-st:focus-visible{background:var(--panel-2);outline:none}
+.hm-st b{display:block;font:600 14px "IBM Plex Sans",sans-serif}
+.hm-st small{display:block;color:var(--ink-3);font:12px "IBM Plex Sans",sans-serif}
+.hm-row{display:flex;align-items:center;justify-content:space-between;gap:8px}
+.hm-chip{display:inline-flex;align-items:center;gap:5px;border-radius:999px;padding:1px 10px;font:600 11.5px "IBM Plex Sans",sans-serif;border:1px solid transparent;white-space:nowrap}
+.hm-chip.ok{background:var(--ok-bg);color:var(--ok);border-color:var(--ok)}
+.hm-chip.warn{background:var(--warn-bg);color:var(--warn);border-color:var(--warn)}
+.hm-chip.crit{background:var(--crit-bg);color:var(--crit);border-color:var(--crit)}
+.hm-chip.stale{background:var(--panel-2);color:var(--ink-3);border-color:var(--line)}
+.hm-tiles{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin:8px 0}
+.hm-t{background:var(--panel-2);border:1px solid var(--line-soft);border-radius:6px;padding:5px 8px}
+.hm-t span{display:block;font:11px "IBM Plex Sans",sans-serif;color:var(--ink-3)}
+.hm-t b{font:600 15px "IBM Plex Mono",monospace;color:var(--ink)}
+.hm-t em{font:11px "IBM Plex Mono",monospace;color:var(--ink-3);font-style:normal;margin-left:3px}
+.hm-open{display:block;width:100%;margin-top:6px;padding:7px 10px;border-radius:6px;border:1px solid var(--accent);background:var(--accent-bg,rgba(31,94,78,.12));color:var(--accent);font:600 13px "IBM Plex Sans",sans-serif;cursor:pointer}
+.hm-open:hover{background:var(--accent);color:var(--panel)}
+.hm-note{padding:8px 12px 10px;border-top:1px solid var(--line-soft);font:11.5px/1.45 "IBM Plex Sans",sans-serif;color:var(--ink-3)}
+.hm-mk{width:28px;height:28px;border-radius:50%;border:3px solid #fff;box-shadow:0 0 0 2px rgba(0,0,0,.4);display:grid;place-items:center;color:#fff;font:700 12px "IBM Plex Mono",monospace}
+.hm-mk.ok{background:#1F5E4E}.hm-mk.warn{background:#C99A1B}.hm-mk.crit{background:#B23A2A}.hm-mk.stale{background:#6B7686}
+.hm-pop{min-width:230px;font-family:"IBM Plex Sans",sans-serif}
+.hm-pop h4{margin:0;font:600 15px "IBM Plex Sans",sans-serif}
+.hm-pop .hm-loc{font-size:12px;color:#5F7384;margin:1px 0 6px}
+.home-back{border:1px solid var(--line);background:var(--panel);color:var(--ink);border-radius:6px;padding:4px 10px;font:600 12px "IBM Plex Sans",sans-serif;cursor:pointer;margin:0 8px 4px 0}
+.home-back:hover{border-color:var(--accent);color:var(--accent)}
+.hm-hdrback{margin:6px 0 0}
+body.home-on header .note,body.home-on header .rb-about{display:none}
+.leaflet-popup-content-wrapper,.leaflet-popup-tip{background:var(--panel);color:var(--ink)}
+.leaflet-container a.leaflet-popup-close-button{color:var(--ink-3)}
+.leaflet-popup-content{margin:12px 14px}
