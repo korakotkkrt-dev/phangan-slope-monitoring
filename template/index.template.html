@@ -3576,7 +3576,7 @@ function drawUserLinesHook(spec){
         fitCache = f;
         x1 = f.xFirst; x2 = f.xLast; y1 = f.a * (x1 - f.t0) / 3600 + f.b; y2 = f.a * (x2 - f.t0) / 3600 + f.b;
         // only the slope line is drawn: no shading behind it
-        if (ln.num){ label = '#' + ln.num; } else { fitNo++; label = '#' + fitNo; }
+        fitNo++; label = '#' + fitNo;
       } else {
         const { K } = lineStats(x1, y1, x2, y2);
         label = 'K ≈ ' + (K >= 0 ? '+' : '') + K.toFixed(4) + (ln.u || '°') + '/hr';
@@ -3595,10 +3595,9 @@ function drawUserLinesHook(spec){
       });
       if (ln.fit){
         const f2 = fitCache, un2 = trendUnitFor(spec);
-        let tcol = col, ttxt = label + ((ln.snap && !ln.num) ? ' ' + ln.nm : '');
+        let tcol = col, ttxt = label + (ln.snap ? ' ' + ln.nm : '');
         if (f2 && isFinite(f2.a)){
-          if (ln.num){ ttxt = ttxt + ' ' + fmtSlope(f2.a * 24) + (un2 || '') + '/day'; }          // slide style: '#14 +0.0008'
-          else { ttxt = ttxt + ' ' + fmtSlope(f2.a * 24) + (un2 || '') + '/day'; ttxt += ' \u00b7 ' + fmtShort(f2.xFirst) + '\u2192' + fmtShort(f2.xLast); }
+          ttxt = ttxt + ' ' + fmtSlope(f2.a * 24) + (un2 || '') + '/day'; ttxt += ' · ' + fmtShort(f2.xFirst) + '→' + fmtShort(f2.xLast);
           if (un2 === '\u00b0'){ const sc = deckSpeedClass(Math.abs(f2.a)); tcol = sc.c; }
         }
         tags.push({ text: ttxt, x: px2, y: py2, col: tcol });
@@ -3656,7 +3655,6 @@ function renderDrawLineList(chartId, listEl, onChange){
   const sign = v => (v >= 0 ? '+' : '');
   let fitNo = 0;
   lines.forEach((ln, i) => {
-    if (ln.auto) return;      // 'all ranges' lines are summarised in one row below
     const row = document.createElement('div'); row.className = 'drawline-row'; row.dataset.id = ln.id;
     const body = document.createElement('span'); body.style.cssText = 'flex:1;min-width:0';
     if (ln.fit && rec && spec){
@@ -3716,28 +3714,6 @@ function renderDrawLineList(chartId, listEl, onChange){
     row.append(body, del);
     listEl.appendChild(row);
   });
-  const autos = lines.filter(l => l.auto);
-  if (autos.length && rec && spec){
-    const row = document.createElement('div'); row.className = 'drawline-row';
-    const body = document.createElement('span'); body.style.cssText = 'flex:1;min-width:0';
-    const chs = []; autos.forEach(l => { if (chs.indexOf(l.nm) < 0) chs.push(l.nm); });
-    let tb = '<table class="tr-table"><thead><tr><th>#</th><th>series</th><th>from</th><th>to</th><th>slope /day</th><th>slope /h</th><th>R²</th><th>n</th></tr></thead><tbody>';
-    autos.forEach(l => {
-      const f = fitSeriesWindow(rec.u, spec, l.nm, l.w1, l.w2);
-      tb += '<tr><td>#' + l.num + '</td><td>' + escapeHtml(l.nm) + '</td><td>' + fmtShort(l.w1) + '</td><td>' + fmtShort(l.w2) + '</td>' +
-        (f ? '<td>' + fmtSlope(f.a * 24) + '</td><td>' + fmtSlope(f.a) + '</td><td>' + (f.r2 === f.r2 ? f.r2.toFixed(2) : 'n/a') + '</td><td>' + f.n.toLocaleString() + '</td>' : '<td colspan="4">not enough data</td>') + '</tr>';
-    });
-    body.innerHTML = '<b>all ranges</b> (slide method) — ' + autos.length + ' stretches on ' + chs.map(escapeHtml).join(', ') + ' · least-squares slope of the data shown, tags on the chart = #n and degree/day' +
-      '<details><summary class="n">table of the stretches</summary>' + tb + '</tbody></table></details>';
-    const del = document.createElement('button'); del.type = 'button'; del.title = 'remove all of these lines'; del.textContent = '×';
-    del.onclick = () => {
-      drawLineStore[chartId] = (drawLineStore[chartId] || []).filter(l => !l.auto);
-      if (!drawLineStore[chartId].length) delete drawLineStore[chartId];
-      saveDrawLineStore(); onChange();
-    };
-    row.append(body, del);
-    listEl.appendChild(row);
-  }
 }
 
 // ==================== chart tools: show, filter, shift ====================
@@ -4770,7 +4746,7 @@ function makeChartNow(spec){
     note.textContent = spec.note;
     wrap.appendChild(note);
   }
-  let measureBtn = null, measureReadout = null, drawLineBtn = null, drawLineList = null, allRangesBtn = null;
+  let measureBtn = null, measureReadout = null, drawLineBtn = null, drawLineList = null;
   if (spec.measurable){
     const measureRow = document.createElement('div');
     measureRow.className = 'view-toggle';
@@ -4783,10 +4759,6 @@ function makeChartNow(spec){
     drawLineBtn.textContent = 'draw line';
     drawLineBtn.title = 'toggle on, then click the START and the END of the stretch you care about. Each click SNAPS to the nearest real data sample (the series it snapped to is named next to the cursor); the line drawn is the least-squares line through ALL samples of that series between the two clicks, so its slope is the slope of the data over the whole stretch. The list below shows the series, the two snapped samples, slope, R² and the straight start→end slope, and lets you switch to another series.';
     measureRow.appendChild(drawLineBtn);
-    allRangesBtn = document.createElement('button');
-    allRangesBtn.textContent = 'all ranges';
-    allRangesBtn.title = 'draws every stretch the slide method finds (the same stretches as the Auto trend lines table / the slides) for the series that are visible on this chart: a least-squares slope line per stretch, tagged #n with its slope in degree/day, numbered like the slides. Click again to remove them. Hide the series you do not want first (click their names in the legend).';
-    measureRow.appendChild(allRangesBtn);
     wrap.appendChild(measureRow);
     measureReadout = document.createElement('div');
     measureReadout.className = 'note measure-readout';
@@ -5142,36 +5114,6 @@ function makeChartNow(spec){
     // still exactly what's needed to render any lines restored from storage.
     requestAnimationFrame(() => { if (drawLineStore[spec.id] && drawLineStore[spec.id].length) refreshDrawLines(); });
 
-    // ---- 'all ranges': every slide-method stretch of the visible series, drawn as a least-squares line on the data shown ----
-    allRangesBtn.onclick = () => {
-      const store = drawLineStore[spec.id] = drawLineStore[spec.id] || [];
-      if (store.some(l => l.auto)){
-        drawLineStore[spec.id] = store.filter(l => !l.auto);
-        if (!drawLineStore[spec.id].length) delete drawLineStore[spec.id];
-        allRangesBtn.classList.remove('on'); allRangesBtn.textContent = 'all ranges';
-        saveDrawLineStore(); refreshDrawLines(); return;
-      }
-      let R = null;
-      try { R = window.PSWTrendsUI && PSWTrendsUI.compute && PSWTrendsUI.compute(); } catch(e){ R = null; }
-      const S = R && R[spec.section];
-      if (!S || !S.phases){ alert('the slide-method analysis is not available on this page'); return; }
-      const lineOf = p => p.slopeDay !== undefined && p.kind !== 'step' && p.kind !== 'settle';
-      const tk = c => { const m = /^tilt_(\d+)(?:_(\w+))?$/.exec(c); return m ? [+m[1], m[2] || ''] : [999, c]; };
-      const cmp = (p, q) => { const a = tk(p.ch), b = tk(q.ch); return (a[0] - b[0]) || (a[1] < b[1] ? -1 : a[1] > b[1] ? 1 : 0) || (p.start - q.start); };
-      const all = S.phases.filter(lineOf).sort(cmp);
-      let added = 0;
-      all.forEach((p, i) => {
-        const k = seriesIdxByName(u, p.ch);
-        if (k < 1 || u.series[k].show === false) return;
-        store.push({ id: drawLineIdSeq++, fit: true, auto: true, num: i + 1, nm: p.ch, c: SERIES_COLORS[spec.id + '|' + p.ch], u: trendUnit || '',
-                     w1: p.start * 86400 - 25200, w2: (p.end + 1) * 86400 - 25200 - 60 });
-        added++;
-      });
-      if (!added){ alert('no slide-method stretch found for the series that are visible on this chart'); return; }
-      allRangesBtn.classList.add('on'); allRangesBtn.textContent = 'all ranges: on';
-      saveDrawLineStore(); refreshDrawLines();
-    };
-    if ((drawLineStore[spec.id] || []).some(l => l.auto)){ allRangesBtn.classList.add('on'); allRangesBtn.textContent = 'all ranges: on'; }
     let drawArmed = false, pendingPoint = null, downXY = null, previewRAF = null, lastMove = null;
     const clearPreview = () => {
       if (previewRAF){ cancelAnimationFrame(previewRAF); previewRAF = null; }
@@ -8239,7 +8181,7 @@ function init(){
     const go = () => { const b = find(); if (!b) return say('this chart has no "' + text + '" tool - point at another chart', 'bad'); b.click(); };
     if (find()) return go();
     const w0 = toolChart(text) || activeChart();
-    if (w0.querySelector('.chart-tool-btn') && !/trendline|draw|measure|all ranges/.test(text)) return go();
+    if (w0.querySelector('.chart-tool-btn') && !/trendline|draw|measure/.test(text)) return go();
     w0.scrollIntoView({ block: 'center' });
     say('building the chart...', 'ok');
     let n = 0;
@@ -8318,7 +8260,6 @@ function init(){
   const gFit = grp(anaB, 'Fit a line');
   btn(gFit, '', 'Trendline', () => chartTool('trendline'), 'straight line through the window you are looking at (zoom first)');
   btn(gFit, '', 'Draw line', () => chartTool('draw'), 'click a START and an END point; both snap to real data samples and the slope of that series over the whole stretch is shown');
-  btn(gFit, '', 'All ranges', () => chartTool('all ranges'), 'draw every slope stretch of the slide method (as in the slides) for the series visible on the chart; click again to remove');
   btn(gFit, '', 'Measure rate', () => chartTool('measure'), 'rate of change in degrees per hour over the zoomed window');
   const gSlide = grp(anaB, 'Slide method');
   btn(gSlide, '', 'Auto trend lines', () => { if (window.PSWTrendsUI) PSWTrendsUI.open(); }, 'step-corrected daily tilt with trend lines for every stretch, speed classes, a table, and its own Filter and Shift - the same analysis as the slides');
