@@ -3367,6 +3367,7 @@ function loadDrawLineStore(){
 function saveDrawLineStore(){ try { localStorage.setItem(DRAWLINE_STORE_KEY, JSON.stringify(drawLineStore)); } catch(e){ /* private mode — lines still apply this session */ } }
 let drawLineStore = loadDrawLineStore(); // { [chartId]: [ {id, x1, y1, x2, y2}, ... ] }
 let drawLineIdSeq = 1;
+function nextLineNo(chartId){ const a = drawLineStore[chartId] || []; return a.reduce((m, l) => Math.max(m, l.no || 0), a.length) + 1; }
 // Live rubber-band preview: after the first click is placed, this holds a
 // {x1,y1,x2,y2} from that point to the current cursor position while the
 // user aims for the second click — pure visual/K-estimate feedback, never
@@ -3606,6 +3607,7 @@ function drawUserLinesHook(spec){
     const tags = [], slideTags = [];
     let fitNo = 0;
     (lines || []).forEach(ln => {
+      if (ln.hide) return;
       let x1 = ln.x1, y1 = ln.y1, x2 = ln.x2, y2 = ln.y2, label, col = ln.c || COLOR_DRAWLINE, fitCache = null;
       if (ln.fit){
         const k = seriesIdxByName(u, ln.nm);
@@ -3615,7 +3617,7 @@ function drawUserLinesHook(spec){
         fitCache = f;
         x1 = f.xFirst; x2 = f.xLast; y1 = f.a * (x1 - f.t0) / 3600 + f.b; y2 = f.a * (x2 - f.t0) / 3600 + f.b;
         // only the slope line is drawn: no shading behind it
-        fitNo++; label = '#' + fitNo;
+        label = '#' + (ln.no || ++fitNo);
       } else {
         const { K } = lineStats(x1, y1, x2, y2);
         label = 'K ≈ ' + (K >= 0 ? '+' : '') + K.toFixed(4) + (ln.u || '°') + '/hr';
@@ -3697,9 +3699,54 @@ function renderDrawLineList(chartId, listEl, onChange){
     listEl.appendChild(lg); }
   const rec = charts.find(c => c.id === chartId), spec = chartSpecs.find(s => s.id === chartId);
   const sign = v => (v >= 0 ? '+' : '');
+  { let mx = lines.reduce((m, l) => Math.max(m, l.no || 0), 0), changed = false;
+    lines.forEach(l => { if (!l.no){ l.no = ++mx; changed = true; } });
+    if (changed) saveDrawLineStore(); }
+  // ---- Excel-style tick list: tick = line shown on the chart, untick = hidden (kept in the list)
+  { const fitLines = lines.filter(l => l.fit);
+    const apply = fn => { fn(); saveDrawLineStore(); onChange(); };
+    const box = document.createElement('div'); box.style.cssText = 'margin:4px 0 6px';
+    const bar = document.createElement('div'); bar.style.cssText = 'display:flex;flex-wrap:wrap;gap:4px 10px;align-items:center;margin-bottom:4px';
+    const mk = (txt, fn) => { const b = document.createElement('button'); b.type = 'button'; b.textContent = txt; b.style.cssText = 'font:11px "IBM Plex Mono",monospace;padding:1px 8px'; b.onclick = () => apply(fn); return b; };
+    bar.appendChild(mk('show all', () => lines.forEach(l => { delete l.hide; })));
+    bar.appendChild(mk('hide all', () => lines.forEach(l => { l.hide = true; })));
+    const names = []; fitLines.forEach(l => { if (names.indexOf(l.nm) < 0) names.push(l.nm); });
+    names.forEach(nm => {
+      const mine = fitLines.filter(l => l.nm === nm), on = mine.filter(l => !l.hide).length;
+      const lab = document.createElement('label'); lab.style.cssText = 'display:inline-flex;align-items:center;gap:4px;margin:0;font:11px "IBM Plex Mono",monospace;cursor:pointer';
+      const cb = document.createElement('input'); cb.type = 'checkbox'; cb.style.cssText = 'width:auto;margin:0';
+      cb.checked = on === mine.length; cb.indeterminate = on > 0 && on < mine.length;
+      cb.onchange = () => apply(() => mine.forEach(l => { if (cb.checked) delete l.hide; else l.hide = true; }));
+      lab.append(cb, document.createTextNode(nm + ' (' + on + '/' + mine.length + ')'));
+      bar.appendChild(lab);
+    });
+    box.appendChild(bar);
+    const wrapT = document.createElement('div'); wrapT.style.cssText = 'max-height:260px;overflow:auto;border:1px solid var(--line);border-radius:4px;background:var(--panel)';
+    const tb = document.createElement('table'); tb.style.cssText = 'border-collapse:collapse;width:100%;font:11px "IBM Plex Mono",monospace';
+    tb.innerHTML = '<thead><tr style="position:sticky;top:0;background:var(--panel-2)"><th></th><th>#</th><th style="text-align:left">series</th><th>from</th><th>to</th><th>slope /day</th><th>R²</th></tr></thead>';
+    const tbody = document.createElement('tbody');
+    lines.forEach(l => {
+      const tr = document.createElement('tr'); tr.style.cssText = 'border-top:1px solid var(--line);' + (l.hide ? 'opacity:.45' : '');
+      const f = (l.fit && rec && spec) ? fitSeriesWindow(rec.u, spec, l.nm, l.w1, l.w2) : null;
+      const c0 = document.createElement('td'); c0.style.textAlign = 'center';
+      const cb = document.createElement('input'); cb.type = 'checkbox'; cb.checked = !l.hide; cb.style.cssText = 'width:auto;margin:0'; cb.title = 'tick = show this line on the chart';
+      cb.onchange = () => apply(() => { if (cb.checked) delete l.hide; else l.hide = true; });
+      c0.appendChild(cb); tr.appendChild(c0);
+      const add = (html, st) => { const td = document.createElement('td'); td.style.cssText = 'padding:1px 6px;text-align:center;' + (st || ''); td.innerHTML = html; tr.appendChild(td); };
+      add('#' + l.no, 'font-weight:700');
+      add(l.nm ? escapeHtml(l.nm) : 'hand-drawn', 'text-align:left');
+      add(l.fit ? fmtShort(l.w1) : '', ''); add(l.fit ? fmtShort(l.w2) : '', '');
+      add(f && isFinite(f.a) ? '<b style="color:' + deckSpeedClass(Math.abs(f.a)).c + '">' + (f.a < 0 ? '−' : '+') + Math.abs(f.a * 24).toFixed(Math.abs(f.a * 24) >= 0.01 ? 3 : 4) + '</b>' : '', '');
+      add(f && f.r2 === f.r2 ? f.r2.toFixed(2) : '', '');
+      tbody.appendChild(tr);
+    });
+    tb.appendChild(tbody); wrapT.appendChild(tb); box.appendChild(wrapT); listEl.appendChild(box); }
+  // ---- per-line details (fold away when there are many lines)
+  const detBox = document.createElement('details'); detBox.open = lines.length <= 4;
+  { const sm = document.createElement('summary'); sm.className = 'n'; sm.style.cursor = 'pointer'; sm.textContent = 'details of each line (' + lines.length + ')'; detBox.appendChild(sm); }
   let fitNo = 0;
   lines.forEach((ln, i) => {
-    const row = document.createElement('div'); row.className = 'drawline-row'; row.dataset.id = ln.id;
+    const row = document.createElement('div'); row.className = 'drawline-row'; row.dataset.id = ln.id; if (ln.hide) row.style.opacity = '.5';
     const body = document.createElement('span'); body.style.cssText = 'flex:1;min-width:0';
     if (ln.fit && rec && spec){
       const f = fitSeriesWindow(rec.u, spec, ln.nm, ln.w1, ln.w2);
@@ -3711,7 +3758,7 @@ function renderDrawLineList(chartId, listEl, onChange){
         if (f.r2 === f.r2 && f.r2 < 0.3) warns.push('weak fit');
         if (f.n < 10) warns.push('few points');
         fitNo++;
-        body.innerHTML = '<span class="fit-tag" style="background:' + col + '">#' + fitNo + '</span> <b>' + escapeHtml(ln.nm) + '</b> — slope <b>' + fmtSlope(f.a) + ' ' + un + '/h</b> (' + fmtSlope(f.a * 24) + ' ' + un + '/day) · R² ' + (f.r2 === f.r2 ? f.r2.toFixed(3) : 'n/a') + ' · n ' + f.n.toLocaleString() +
+        body.innerHTML = '<span class="fit-tag" style="background:' + col + '">#' + (ln.no || fitNo) + '</span> <b>' + escapeHtml(ln.nm) + '</b> — slope <b>' + fmtSlope(f.a) + ' ' + un + '/h</b> (' + fmtSlope(f.a * 24) + ' ' + un + '/day) · R² ' + (f.r2 === f.r2 ? f.r2.toFixed(3) : 'n/a') + ' · n ' + f.n.toLocaleString() +
           (warns.length ? ' <span class="tr-warn">⚠ ' + warns.join(', ') + '</span>' : '') +
           '<br><span class="n">window ' + fmtDate(f.w1) + ' → ' + fmtDate(f.w2) + ' (' + (hrs < 48 ? hrs.toFixed(1) + ' h' : (hrs / 24).toFixed(1) + ' d') + ') · y = ' + fmtSlope(f.a) + '·t ' + (f.b >= 0 ? '+ ' : '− ') + Math.abs(f.b).toFixed(3) + ' (t in hours from window start)' + (f.excl ? ' · ' + f.excl + ' fault samples left out' : '') + (f.spk ? ' · ' + f.spk.toLocaleString() + ' glitch spikes left out' : '') + '</span>';
         if (ln.snap){
@@ -3725,7 +3772,7 @@ function renderDrawLineList(chartId, listEl, onChange){
         }
       } else {
         fitNo++;
-        body.innerHTML = '<span class="fit-tag" style="background:' + col + '">#' + fitNo + '</span> <b>' + escapeHtml(ln.nm) + '</b> \u2014 <span class="n">not enough data in this window (series hidden, filtered out or missing)</span>';
+        body.innerHTML = '<span class="fit-tag" style="background:' + col + '">#' + (ln.no || fitNo) + '</span> <b>' + escapeHtml(ln.nm) + '</b> \u2014 <span class="n">not enough data in this window (series hidden, filtered out or missing)</span>';
       }
       const sel = document.createElement('select');
       sel.title = 'fit this stretch on another series';
@@ -3756,8 +3803,9 @@ function renderDrawLineList(chartId, listEl, onChange){
       onChange();
     };
     row.append(body, del);
-    listEl.appendChild(row);
+    detBox.appendChild(row);
   });
+  listEl.appendChild(detBox);
 }
 
 // ==================== chart tools: show, filter, shift ====================
@@ -5103,7 +5151,7 @@ function makeChartNow(spec){
     };
     const pinRows = rows => {
       rows.forEach(r => {
-        (drawLineStore[spec.id] = drawLineStore[spec.id] || []).push({ id: drawLineIdSeq++, fit: true, pin: true, nm: r.nm, c: r.color, u: trendUnit || '', w1: spec._trend.xMin, w2: spec._trend.xMax });
+        (drawLineStore[spec.id] = drawLineStore[spec.id] || []).push({ id: drawLineIdSeq++, no: nextLineNo(spec.id), fit: true, pin: true, nm: r.nm, c: r.color, u: trendUnit || '', w1: spec._trend.xMin, w2: spec._trend.xMax });
       });
       saveDrawLineStore();
       refreshPins();
@@ -5220,7 +5268,7 @@ function makeChartNow(spec){
       if (!s2) return;
       const w1 = Math.min(s1.x, s2.x), w2 = Math.max(s1.x, s2.x);
       if (w2 - w1 < 120) return;               // both clicks on the same sample: wait for a different END point
-      (drawLineStore[spec.id] = drawLineStore[spec.id] || []).push({ id: drawLineIdSeq++, fit: true, snap: true, nm: s1.nm, c: SERIES_COLORS[spec.id + '|' + s1.nm], u: trendUnit || '', w1, w2 });
+      (drawLineStore[spec.id] = drawLineStore[spec.id] || []).push({ id: drawLineIdSeq++, no: nextLineNo(spec.id), fit: true, snap: true, nm: s1.nm, c: SERIES_COLORS[spec.id + '|' + s1.nm], u: trendUnit || '', w1, w2 });
       saveDrawLineStore();
       // chain: the end of this stretch is the start of the next one (right-click or Esc to stop)
       pendingPoint = (s2.x >= s1.x) ? s2 : s1;
