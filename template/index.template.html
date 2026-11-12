@@ -3548,6 +3548,45 @@ function drawFitTags(ctx, tags, dpr, left, top, width, height){
   ctx.restore();
 }
 
+// tags like the slides: a white box with a coloured border and coloured bold text ('#26 -0.0054'), set above/below the middle of its line
+// (alternating), pushed apart when they would overlap, joined to the line by a thin arrow.
+function drawSlideTags(ctx, tags, dpr, left, top, width, height){
+  if (!tags.length) return;
+  ctx.save();
+  ctx.font = 'bold ' + (10.5 * dpr) + 'px "IBM Plex Mono", monospace';
+  ctx.textBaseline = 'middle'; ctx.textAlign = 'center'; ctx.setLineDash([]);
+  const h = 16 * dpr, gap = h + 2 * dpr;
+  tags.forEach((t, i) => { t.w = ctx.measureText(t.text).width + 10 * dpr; t.ax = t.x; t.ay = t.y; t.y = t.ay + (i % 2 ? 26 : -26) * dpr; });
+  tags.sort((p, q) => p.x - q.x);
+  const placed = [];
+  tags.forEach(t => {
+    t.x = Math.min(Math.max(t.ax, left + t.w / 2 + 2 * dpr), left + width - t.w / 2 - 2 * dpr);
+    let y = Math.min(Math.max(t.y, top + h / 2 + 2 * dpr), top + height - h / 2 - 2 * dpr);
+    for (let k = 0; k < 40; k++){
+      const hit = placed.find(p => Math.abs(p.x - t.x) < (p.w + t.w) / 2 + 3 * dpr && Math.abs(p.y - y) < gap);
+      if (!hit) break;
+      y = (y >= hit.y) ? hit.y + gap : hit.y - gap;
+      if (y > top + height - h / 2 || y < top + h / 2){ y = Math.min(Math.max(y, top + h / 2 + 2 * dpr), top + height - h / 2 - 2 * dpr); break; }
+    }
+    t.y = y; placed.push(t);
+  });
+  tags.forEach(t => {
+    const by = t.y + (t.ay > t.y ? h / 2 : -h / 2);            // leader leaves the box edge that faces the line
+    const dx = t.ax - t.x, dy = t.ay - by, L = Math.hypot(dx, dy);
+    if (L > 4 * dpr){
+      ctx.strokeStyle = t.col; ctx.fillStyle = t.col; ctx.lineWidth = 1.3 * dpr;
+      ctx.beginPath(); ctx.moveTo(t.x, by); ctx.lineTo(t.ax, t.ay); ctx.stroke();
+      const ux = dx / L, uy = dy / L, ah = 6 * dpr;
+      ctx.beginPath(); ctx.moveTo(t.ax, t.ay); ctx.lineTo(t.ax - ux * ah - uy * ah * 0.5, t.ay - uy * ah + ux * ah * 0.5); ctx.lineTo(t.ax - ux * ah + uy * ah * 0.5, t.ay - uy * ah - ux * ah * 0.5); ctx.closePath(); ctx.fill();
+    }
+    const x0 = t.x - t.w / 2, y0 = t.y - h / 2;
+    ctx.fillStyle = COLOR_PANEL; ctx.strokeStyle = t.col; ctx.lineWidth = 1.6 * dpr;
+    ctx.beginPath(); ctx.rect(x0, y0, t.w, h); ctx.fill(); ctx.stroke();
+    ctx.fillStyle = t.col; ctx.fillText(t.text, t.x, t.y + 0.5 * dpr);
+  });
+  ctx.restore();
+}
+
 function drawUserLinesHook(spec){
   return u => {
     const lines = drawLineStore[spec.id];
@@ -3564,7 +3603,7 @@ function drawUserLinesHook(spec){
     ctx.beginPath(); ctx.rect(left, top, width, height); ctx.clip();
     ctx.font = (11 * dpr) + 'px "IBM Plex Mono", monospace';
     ctx.textBaseline = 'bottom';
-    const tags = [];
+    const tags = [], slideTags = [];
     let fitNo = 0;
     (lines || []).forEach(ln => {
       let x1 = ln.x1, y1 = ln.y1, x2 = ln.x2, y2 = ln.y2, label, col = ln.c || COLOR_DRAWLINE, fitCache = null;
@@ -3585,11 +3624,12 @@ function drawUserLinesHook(spec){
       const px2 = xToPx(x2), py2 = u.valToPos(y2, 'y', true);
       if ([px1, py1, px2, py2].some(v => v == null || isNaN(v) || !isFinite(v))) return;
       if (ln.fit){ ctx.lineWidth = 5 * dpr; ctx.strokeStyle = COLOR_PANEL; ctx.globalAlpha = 0.75; ctx.beginPath(); ctx.moveTo(px1, py1); ctx.lineTo(px2, py2); ctx.stroke(); ctx.globalAlpha = 1; }
-      ctx.lineWidth = 2.4 * dpr;
-      ctx.strokeStyle = col;
-      ctx.setLineDash(ln.fit ? [] : []);
+      ctx.lineWidth = (ln.fit ? 3 : 2.4) * dpr;
+      ctx.strokeStyle = ln.fit ? COLOR_INK : col;            // slides: a dark dashed slope line over the data
+      ctx.setLineDash(ln.fit ? [9 * dpr, 5 * dpr] : []);
       ctx.beginPath(); ctx.moveTo(px1, py1); ctx.lineTo(px2, py2); ctx.stroke();
-      [[px1, py1], [px2, py2]].forEach(([px, py]) => {
+      ctx.setLineDash([]);
+      if (!ln.fit) [[px1, py1], [px2, py2]].forEach(([px, py]) => {
         ctx.beginPath(); ctx.arc(px, py, 3 * dpr, 0, 2 * Math.PI);
         ctx.fillStyle = col; ctx.fill();
       });
@@ -3597,13 +3637,13 @@ function drawUserLinesHook(spec){
         const f2 = fitCache, un2 = trendUnitFor(spec);
         let tcol = col, ttxt = label;
         if (f2 && isFinite(f2.a)){
-          ttxt = ttxt + ' ' + fmtSlope(f2.a * 24) + (un2 || '') + '/day';    // short tag like the slides ('#14 +0.0008'); series and dates are in the list below the chart
+          { const dv = f2.a * 24, av = Math.abs(dv); ttxt = ttxt + ' ' + (dv < 0 ? '\u2212' : '+') + av.toFixed(av >= 0.01 ? 3 : 4); }    // as on the slides: '#26 \u22120.0054' (degree/day); series and dates are in the list below the chart
           if (un2 === '\u00b0'){ const sc = deckSpeedClass(Math.abs(f2.a)); tcol = sc.c; }
         }
-        tags.push({ text: ttxt, x: px2, y: py2, col: tcol });
+        slideTags.push({ text: ttxt, x: (px1 + px2) / 2, y: (py1 + py2) / 2, col: tcol });
       }
     });
-    drawFitTags(ctx, tags, dpr, left, top, width, height);
+    drawSlideTags(ctx, slideTags, dpr, left, top, width, height);
     // aiming (draw line): the snapped sample under the cursor, then the stretch to the second snapped sample
     if (preview){
       const un = trendUnitFor(spec) || '';
@@ -3651,6 +3691,10 @@ function renderDrawLineList(chartId, listEl, onChange){
   listEl.className = 'note measure-readout drawline-list';
   listEl.style.display = '';
   listEl.innerHTML = '';
+  { const lg = document.createElement('div'); lg.className = 'n'; lg.style.cssText = 'margin-bottom:5px';
+    const sw = (v, txt) => '<b style="color:' + deckSpeedClass(v).c + '">■ ' + txt + '</b>';
+    lg.innerHTML = 'tag = #n and slope in degree/day · tag colour = speed class (degree/hour): ' + sw(0.001, 'very slow &lt;0.004') + ' ' + sw(0.01, 'slow 0.004–0.04') + ' ' + sw(0.1, 'moderate 0.04–0.4') + ' ' + sw(1, 'rapid &gt;0.4');
+    listEl.appendChild(lg); }
   const rec = charts.find(c => c.id === chartId), spec = chartSpecs.find(s => s.id === chartId);
   const sign = v => (v >= 0 ? '+' : '');
   let fitNo = 0;
