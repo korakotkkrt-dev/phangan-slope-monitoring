@@ -3567,17 +3567,16 @@ function drawUserLinesHook(spec){
     const tags = [];
     let fitNo = 0;
     (lines || []).forEach(ln => {
-      let x1 = ln.x1, y1 = ln.y1, x2 = ln.x2, y2 = ln.y2, label, col = ln.c || COLOR_DRAWLINE;
+      let x1 = ln.x1, y1 = ln.y1, x2 = ln.x2, y2 = ln.y2, label, col = ln.c || COLOR_DRAWLINE, fitCache = null;
       if (ln.fit){
         const k = seriesIdxByName(u, ln.nm);
         if (k < 1 || u.series[k].show === false) return;
         const f = fitSeriesWindow(u, spec, ln.nm, ln.w1, ln.w2);
         if (!f) return;
+        fitCache = f;
         x1 = f.xFirst; x2 = f.xLast; y1 = f.a * (x1 - f.t0) / 3600 + f.b; y2 = f.a * (x2 - f.t0) / 3600 + f.b;
-        // the chosen stretch, lightly shaded
-        const bx1 = xToPx(f.w1), bx2 = xToPx(f.w2);
-        ctx.save(); ctx.globalAlpha = 0.07; ctx.fillStyle = col; ctx.fillRect(Math.min(bx1, bx2), top, Math.abs(bx2 - bx1), height); ctx.restore();
-        fitNo++; label = 'F' + fitNo;
+        // only the slope line is drawn: no shading behind it
+        if (ln.num){ label = '#' + ln.num; } else { fitNo++; label = '#' + fitNo; }
       } else {
         const { K } = lineStats(x1, y1, x2, y2);
         label = 'K ≈ ' + (K >= 0 ? '+' : '') + K.toFixed(4) + (ln.u || '°') + '/hr';
@@ -3594,24 +3593,13 @@ function drawUserLinesHook(spec){
         ctx.beginPath(); ctx.arc(px, py, 3 * dpr, 0, 2 * Math.PI);
         ctx.fillStyle = col; ctx.fill();
       });
-      if (ln.fit && ln.snap){   // rings on the two real data samples the clicks snapped to (the line itself is the least-squares line through ALL samples between them)
-        const kk = seriesIdxByName(u, ln.nm);
-        [ln.w1, ln.w2].forEach(wx => {
-          const vy = valueNearX(u, kk, wx);
-          if (vy !== vy) return;
-          const sx = xToPx(wx), sy = u.valToPos(vy, 'y', true);
-          if (sx == null || sy == null || isNaN(sx) || isNaN(sy)) return;
-          ctx.beginPath(); ctx.arc(sx, sy, 6 * dpr, 0, 2 * Math.PI); ctx.lineWidth = 2 * dpr; ctx.strokeStyle = COLOR_PANEL; ctx.stroke();
-          ctx.beginPath(); ctx.arc(sx, sy, 5 * dpr, 0, 2 * Math.PI); ctx.lineWidth = 2 * dpr; ctx.strokeStyle = col; ctx.stroke();
-        });
-      }
       if (ln.fit){
-        const f2 = fitSeriesWindow(u, spec, ln.nm, ln.w1, ln.w2), un2 = trendUnitFor(spec);
-        let tcol = col, ttxt = label + (ln.snap ? ' ' + ln.nm : '');
+        const f2 = fitCache, un2 = trendUnitFor(spec);
+        let tcol = col, ttxt = label + ((ln.snap && !ln.num) ? ' ' + ln.nm : '');
         if (f2 && isFinite(f2.a)){
-          ttxt = ttxt + ' ' + fmtSlope(f2.a) + (un2 || '') + '/h';
-          ttxt += ' · ' + fmtShort(f2.xFirst) + '→' + fmtShort(f2.xLast);
-          if (un2 === '\u00b0'){ const sc = deckSpeedClass(Math.abs(f2.a)); tcol = sc.c; ttxt += ' ' + sc.k; }
+          if (ln.num){ ttxt = ttxt + ' ' + fmtSlope(f2.a * 24) + (un2 || '') + '/day'; }          // slide style: '#14 +0.0008'
+          else { ttxt = ttxt + ' ' + fmtSlope(f2.a * 24) + (un2 || '') + '/day'; ttxt += ' \u00b7 ' + fmtShort(f2.xFirst) + '\u2192' + fmtShort(f2.xLast); }
+          if (un2 === '\u00b0'){ const sc = deckSpeedClass(Math.abs(f2.a)); tcol = sc.c; }
         }
         tags.push({ text: ttxt, x: px2, y: py2, col: tcol });
       }
@@ -3640,10 +3628,9 @@ function drawUserLinesHook(spec){
       };
       if (preview.s1 && !preview.s2){
         const [px, py] = ring(preview.s1, false);
-        pill('snap \u2192 ' + preview.s1.nm + ' \u00b7 ' + fmtShort(preview.s1.x) + ' \u00b7 ' + fmtSnapVal(preview.s1.y, un) + '  (click to set START)', px + 12 * dpr, py - 26 * dpr);
+        pill('snap \u2192 ' + preview.s1.nm + ' \u00b7 ' + fmtShort(preview.s1.x) + ' \u00b7 ' + fmtSnapVal(preview.s1.y, un) + (preview.hover ? '  (click to set START)' : '  (click to set END \u00b7 right-click = new start)'), px + 12 * dpr, py - 26 * dpr);
       } else if (preview.s1 && preview.s2){
         const bx1 = xToPx(preview.s1.x), bx2 = xToPx(preview.s2.x);
-        ctx.globalAlpha = 0.10; ctx.fillStyle = col; ctx.fillRect(Math.min(bx1, bx2), top, Math.abs(bx2 - bx1), height); ctx.globalAlpha = 1;
         const [ax, ay] = ring(preview.s1, true), [bx, by] = ring(preview.s2, false);
         ctx.setLineDash([5 * dpr, 4 * dpr]); ctx.lineWidth = 1.5 * dpr; ctx.strokeStyle = col;
         ctx.beginPath(); ctx.moveTo(ax, ay); ctx.lineTo(bx, by); ctx.stroke(); ctx.setLineDash([]);
@@ -3651,7 +3638,7 @@ function drawUserLinesHook(spec){
         const w1 = Math.min(preview.s1.x, preview.s2.x), w2 = Math.max(preview.s1.x, preview.s2.x);
         const f = (w2 - w1 >= 120) ? fitSeriesWindow(u, spec, preview.s1.nm, w1, w2) : null;
         pill('snap \u2192 ' + preview.s1.nm + ' \u00b7 ' + (hrs < 48 ? hrs.toFixed(1) + ' h' : (hrs / 24).toFixed(1) + ' d') +
-          (f ? ' \u00b7 slope ' + fmtSlope(f.a) + un + '/h (least squares, n ' + f.n.toLocaleString() + ')' : '') + '  (click to set END)', Math.min(bx1, bx2) + 6 * dpr, top + 6 * dpr);
+          (f ? ' \u00b7 slope ' + fmtSlope(f.a) + un + '/h (least squares, n ' + f.n.toLocaleString() + ')' : '') + '  (click = end this stretch & start the next \u00b7 right-click = stop)', Math.min(bx1, bx2) + 6 * dpr, top + 6 * dpr);
       }
       ctx.restore();
     }
@@ -3669,6 +3656,7 @@ function renderDrawLineList(chartId, listEl, onChange){
   const sign = v => (v >= 0 ? '+' : '');
   let fitNo = 0;
   lines.forEach((ln, i) => {
+    if (ln.auto) return;      // 'all ranges' lines are summarised in one row below
     const row = document.createElement('div'); row.className = 'drawline-row'; row.dataset.id = ln.id;
     const body = document.createElement('span'); body.style.cssText = 'flex:1;min-width:0';
     if (ln.fit && rec && spec){
@@ -3681,7 +3669,7 @@ function renderDrawLineList(chartId, listEl, onChange){
         if (f.r2 === f.r2 && f.r2 < 0.3) warns.push('weak fit');
         if (f.n < 10) warns.push('few points');
         fitNo++;
-        body.innerHTML = '<span class="fit-tag" style="background:' + col + '">F' + fitNo + '</span> <b>' + escapeHtml(ln.nm) + '</b> — slope <b>' + fmtSlope(f.a) + ' ' + un + '/h</b> (' + fmtSlope(f.a * 24) + ' ' + un + '/day) · R² ' + (f.r2 === f.r2 ? f.r2.toFixed(3) : 'n/a') + ' · n ' + f.n.toLocaleString() +
+        body.innerHTML = '<span class="fit-tag" style="background:' + col + '">#' + fitNo + '</span> <b>' + escapeHtml(ln.nm) + '</b> — slope <b>' + fmtSlope(f.a) + ' ' + un + '/h</b> (' + fmtSlope(f.a * 24) + ' ' + un + '/day) · R² ' + (f.r2 === f.r2 ? f.r2.toFixed(3) : 'n/a') + ' · n ' + f.n.toLocaleString() +
           (warns.length ? ' <span class="tr-warn">⚠ ' + warns.join(', ') + '</span>' : '') +
           '<br><span class="n">window ' + fmtDate(f.w1) + ' → ' + fmtDate(f.w2) + ' (' + (hrs < 48 ? hrs.toFixed(1) + ' h' : (hrs / 24).toFixed(1) + ' d') + ') · y = ' + fmtSlope(f.a) + '·t ' + (f.b >= 0 ? '+ ' : '− ') + Math.abs(f.b).toFixed(3) + ' (t in hours from window start)' + (f.excl ? ' · ' + f.excl + ' fault samples left out' : '') + (f.spk ? ' · ' + f.spk.toLocaleString() + ' glitch spikes left out' : '') + '</span>';
         if (ln.snap){
@@ -3695,7 +3683,7 @@ function renderDrawLineList(chartId, listEl, onChange){
         }
       } else {
         fitNo++;
-        body.innerHTML = '<span class="fit-tag" style="background:' + col + '">F' + fitNo + '</span> <b>' + escapeHtml(ln.nm) + '</b> \u2014 <span class="n">not enough data in this window (series hidden, filtered out or missing)</span>';
+        body.innerHTML = '<span class="fit-tag" style="background:' + col + '">#' + fitNo + '</span> <b>' + escapeHtml(ln.nm) + '</b> \u2014 <span class="n">not enough data in this window (series hidden, filtered out or missing)</span>';
       }
       const sel = document.createElement('select');
       sel.title = 'fit this stretch on another series';
@@ -3728,6 +3716,28 @@ function renderDrawLineList(chartId, listEl, onChange){
     row.append(body, del);
     listEl.appendChild(row);
   });
+  const autos = lines.filter(l => l.auto);
+  if (autos.length && rec && spec){
+    const row = document.createElement('div'); row.className = 'drawline-row';
+    const body = document.createElement('span'); body.style.cssText = 'flex:1;min-width:0';
+    const chs = []; autos.forEach(l => { if (chs.indexOf(l.nm) < 0) chs.push(l.nm); });
+    let tb = '<table class="tr-table"><thead><tr><th>#</th><th>series</th><th>from</th><th>to</th><th>slope /day</th><th>slope /h</th><th>R²</th><th>n</th></tr></thead><tbody>';
+    autos.forEach(l => {
+      const f = fitSeriesWindow(rec.u, spec, l.nm, l.w1, l.w2);
+      tb += '<tr><td>#' + l.num + '</td><td>' + escapeHtml(l.nm) + '</td><td>' + fmtShort(l.w1) + '</td><td>' + fmtShort(l.w2) + '</td>' +
+        (f ? '<td>' + fmtSlope(f.a * 24) + '</td><td>' + fmtSlope(f.a) + '</td><td>' + (f.r2 === f.r2 ? f.r2.toFixed(2) : 'n/a') + '</td><td>' + f.n.toLocaleString() + '</td>' : '<td colspan="4">not enough data</td>') + '</tr>';
+    });
+    body.innerHTML = '<b>all ranges</b> (slide method) — ' + autos.length + ' stretches on ' + chs.map(escapeHtml).join(', ') + ' · least-squares slope of the data shown, tags on the chart = #n and degree/day' +
+      '<details><summary class="n">table of the stretches</summary>' + tb + '</tbody></table></details>';
+    const del = document.createElement('button'); del.type = 'button'; del.title = 'remove all of these lines'; del.textContent = '×';
+    del.onclick = () => {
+      drawLineStore[chartId] = (drawLineStore[chartId] || []).filter(l => !l.auto);
+      if (!drawLineStore[chartId].length) delete drawLineStore[chartId];
+      saveDrawLineStore(); onChange();
+    };
+    row.append(body, del);
+    listEl.appendChild(row);
+  }
 }
 
 // ==================== chart tools: show, filter, shift ====================
@@ -4760,7 +4770,7 @@ function makeChartNow(spec){
     note.textContent = spec.note;
     wrap.appendChild(note);
   }
-  let measureBtn = null, measureReadout = null, drawLineBtn = null, drawLineList = null;
+  let measureBtn = null, measureReadout = null, drawLineBtn = null, drawLineList = null, allRangesBtn = null;
   if (spec.measurable){
     const measureRow = document.createElement('div');
     measureRow.className = 'view-toggle';
@@ -4773,6 +4783,10 @@ function makeChartNow(spec){
     drawLineBtn.textContent = 'draw line';
     drawLineBtn.title = 'toggle on, then click the START and the END of the stretch you care about. Each click SNAPS to the nearest real data sample (the series it snapped to is named next to the cursor); the line drawn is the least-squares line through ALL samples of that series between the two clicks, so its slope is the slope of the data over the whole stretch. The list below shows the series, the two snapped samples, slope, R² and the straight start→end slope, and lets you switch to another series.';
     measureRow.appendChild(drawLineBtn);
+    allRangesBtn = document.createElement('button');
+    allRangesBtn.textContent = 'all ranges';
+    allRangesBtn.title = 'draws every stretch the slide method finds (the same stretches as the Auto trend lines table / the slides) for the series that are visible on this chart: a least-squares slope line per stretch, tagged #n with its slope in degree/day, numbered like the slides. Click again to remove them. Hide the series you do not want first (click their names in the legend).';
+    measureRow.appendChild(allRangesBtn);
     wrap.appendChild(measureRow);
     measureReadout = document.createElement('div');
     measureReadout.className = 'note measure-readout';
@@ -5128,6 +5142,36 @@ function makeChartNow(spec){
     // still exactly what's needed to render any lines restored from storage.
     requestAnimationFrame(() => { if (drawLineStore[spec.id] && drawLineStore[spec.id].length) refreshDrawLines(); });
 
+    // ---- 'all ranges': every slide-method stretch of the visible series, drawn as a least-squares line on the data shown ----
+    allRangesBtn.onclick = () => {
+      const store = drawLineStore[spec.id] = drawLineStore[spec.id] || [];
+      if (store.some(l => l.auto)){
+        drawLineStore[spec.id] = store.filter(l => !l.auto);
+        if (!drawLineStore[spec.id].length) delete drawLineStore[spec.id];
+        allRangesBtn.classList.remove('on'); allRangesBtn.textContent = 'all ranges';
+        saveDrawLineStore(); refreshDrawLines(); return;
+      }
+      let R = null;
+      try { R = window.PSWTrendsUI && PSWTrendsUI.compute && PSWTrendsUI.compute(); } catch(e){ R = null; }
+      const S = R && R[spec.section];
+      if (!S || !S.phases){ alert('the slide-method analysis is not available on this page'); return; }
+      const lineOf = p => p.slopeDay !== undefined && p.kind !== 'step' && p.kind !== 'settle';
+      const tk = c => { const m = /^tilt_(\d+)(?:_(\w+))?$/.exec(c); return m ? [+m[1], m[2] || ''] : [999, c]; };
+      const cmp = (p, q) => { const a = tk(p.ch), b = tk(q.ch); return (a[0] - b[0]) || (a[1] < b[1] ? -1 : a[1] > b[1] ? 1 : 0) || (p.start - q.start); };
+      const all = S.phases.filter(lineOf).sort(cmp);
+      let added = 0;
+      all.forEach((p, i) => {
+        const k = seriesIdxByName(u, p.ch);
+        if (k < 1 || u.series[k].show === false) return;
+        store.push({ id: drawLineIdSeq++, fit: true, auto: true, num: i + 1, nm: p.ch, c: SERIES_COLORS[spec.id + '|' + p.ch], u: trendUnit || '',
+                     w1: p.start * 86400 - 25200, w2: (p.end + 1) * 86400 - 25200 - 60 });
+        added++;
+      });
+      if (!added){ alert('no slide-method stretch found for the series that are visible on this chart'); return; }
+      allRangesBtn.classList.add('on'); allRangesBtn.textContent = 'all ranges: on';
+      saveDrawLineStore(); refreshDrawLines();
+    };
+    if ((drawLineStore[spec.id] || []).some(l => l.auto)){ allRangesBtn.classList.add('on'); allRangesBtn.textContent = 'all ranges: on'; }
     let drawArmed = false, pendingPoint = null, downXY = null, previewRAF = null, lastMove = null;
     const clearPreview = () => {
       if (previewRAF){ cancelAnimationFrame(previewRAF); previewRAF = null; }
@@ -5156,7 +5200,7 @@ function makeChartNow(spec){
         if (rect.width <= 0) return;
         if (!pendingPoint){
           const sn = snapToData(u, spec, lastMove.cx - rect.left, lastMove.cy - rect.top);
-          if (sn) drawPreview[spec.id] = { s1: sn }; else delete drawPreview[spec.id];
+          if (sn) drawPreview[spec.id] = { s1: sn, hover: true }; else delete drawPreview[spec.id];
         } else {
           const { xMin, xMax } = resolveXRange(u, spec);
           const xVal = xMin + ((lastMove.cx - rect.left) / rect.width) * (xMax - xMin);
@@ -5190,12 +5234,14 @@ function makeChartNow(spec){
       if (!s2) return;
       const w1 = Math.min(s1.x, s2.x), w2 = Math.max(s1.x, s2.x);
       if (w2 - w1 < 120) return;               // both clicks on the same sample: wait for a different END point
-      pendingPoint = null;
-      clearPreview();
       (drawLineStore[spec.id] = drawLineStore[spec.id] || []).push({ id: drawLineIdSeq++, fit: true, snap: true, nm: s1.nm, c: SERIES_COLORS[spec.id + '|' + s1.nm], u: trendUnit || '', w1, w2 });
       saveDrawLineStore();
+      // chain: the end of this stretch is the start of the next one (right-click or Esc to stop)
+      pendingPoint = (s2.x >= s1.x) ? s2 : s1;
+      drawPreview[spec.id] = { s1: pendingPoint };
       refreshDrawLines();
     });
+    u.over.addEventListener('contextmenu', e => { if (drawArmed){ e.preventDefault(); pendingPoint = null; clearPreview(); } });
     window.addEventListener('keydown', e => { if (e.key === 'Escape' && pendingPoint){ pendingPoint = null; clearPreview(); } });
   }
 
@@ -8193,7 +8239,7 @@ function init(){
     const go = () => { const b = find(); if (!b) return say('this chart has no "' + text + '" tool - point at another chart', 'bad'); b.click(); };
     if (find()) return go();
     const w0 = toolChart(text) || activeChart();
-    if (w0.querySelector('.chart-tool-btn') && !/trendline|draw|measure/.test(text)) return go();
+    if (w0.querySelector('.chart-tool-btn') && !/trendline|draw|measure|all ranges/.test(text)) return go();
     w0.scrollIntoView({ block: 'center' });
     say('building the chart...', 'ok');
     let n = 0;
@@ -8272,6 +8318,7 @@ function init(){
   const gFit = grp(anaB, 'Fit a line');
   btn(gFit, '', 'Trendline', () => chartTool('trendline'), 'straight line through the window you are looking at (zoom first)');
   btn(gFit, '', 'Draw line', () => chartTool('draw'), 'click a START and an END point; both snap to real data samples and the slope of that series over the whole stretch is shown');
+  btn(gFit, '', 'All ranges', () => chartTool('all ranges'), 'draw every slope stretch of the slide method (as in the slides) for the series visible on the chart; click again to remove');
   btn(gFit, '', 'Measure rate', () => chartTool('measure'), 'rate of change in degrees per hour over the zoomed window');
   const gSlide = grp(anaB, 'Slide method');
   btn(gSlide, '', 'Auto trend lines', () => { if (window.PSWTrendsUI) PSWTrendsUI.open(); }, 'step-corrected daily tilt with trend lines for every stretch, speed classes, a table, and its own Filter and Shift - the same analysis as the slides');
