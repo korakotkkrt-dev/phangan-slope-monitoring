@@ -3702,43 +3702,46 @@ function renderDrawLineList(chartId, listEl, onChange){
   { let mx = lines.reduce((m, l) => Math.max(m, l.no || 0), 0), changed = false;
     lines.forEach(l => { if (!l.no){ l.no = ++mx; changed = true; } });
     if (changed) saveDrawLineStore(); }
-  // ---- Excel-style tick list: tick = line shown on the chart, untick = hidden (kept in the list)
-  { const fitLines = lines.filter(l => l.fit);
-    const apply = fn => { fn(); saveDrawLineStore(); onChange(); };
+  // ---- Excel-style tick list: ONE TICK PER LINE (tick = shown on the chart, untick = hidden but kept). Rows are grouped by sensor:
+  //      each group is headed by the sensor name, each row repeats the sensor and gives the date range of the line and its slope.
+  { const apply = fn => { fn(); saveDrawLineStore(); onChange(); };
     const box = document.createElement('div'); box.style.cssText = 'margin:4px 0 6px';
     const bar = document.createElement('div'); bar.style.cssText = 'display:flex;flex-wrap:wrap;gap:4px 10px;align-items:center;margin-bottom:4px';
     const mk = (txt, fn) => { const b = document.createElement('button'); b.type = 'button'; b.textContent = txt; b.style.cssText = 'font:11px "IBM Plex Mono",monospace;padding:1px 8px'; b.onclick = () => apply(fn); return b; };
     bar.appendChild(mk('show all', () => lines.forEach(l => { delete l.hide; })));
     bar.appendChild(mk('hide all', () => lines.forEach(l => { l.hide = true; })));
-    const names = []; fitLines.forEach(l => { if (names.indexOf(l.nm) < 0) names.push(l.nm); });
-    names.forEach(nm => {
-      const mine = fitLines.filter(l => l.nm === nm), on = mine.filter(l => !l.hide).length;
-      const lab = document.createElement('label'); lab.style.cssText = 'display:inline-flex;align-items:center;gap:4px;margin:0;font:11px "IBM Plex Mono",monospace;cursor:pointer';
-      const cb = document.createElement('input'); cb.type = 'checkbox'; cb.style.cssText = 'width:auto;margin:0';
-      cb.checked = on === mine.length; cb.indeterminate = on > 0 && on < mine.length;
-      cb.onchange = () => apply(() => mine.forEach(l => { if (cb.checked) delete l.hide; else l.hide = true; }));
-      lab.append(cb, document.createTextNode(nm + ' (' + on + '/' + mine.length + ')'));
-      bar.appendChild(lab);
-    });
+    { const t = document.createElement('span'); t.className = 'n'; t.textContent = 'tick a line to show it on the chart · lines are grouped by sensor'; bar.appendChild(t); }
     box.appendChild(bar);
-    const wrapT = document.createElement('div'); wrapT.style.cssText = 'max-height:260px;overflow:auto;border:1px solid var(--line);border-radius:4px;background:var(--panel)';
+    const wrapT = document.createElement('div'); wrapT.style.cssText = 'max-height:300px;overflow:auto;border:1px solid var(--line);border-radius:4px;background:var(--panel)';
     const tb = document.createElement('table'); tb.style.cssText = 'border-collapse:collapse;width:100%;font:11px "IBM Plex Mono",monospace';
-    tb.innerHTML = '<thead><tr style="position:sticky;top:0;background:var(--panel-2)"><th></th><th>#</th><th style="text-align:left">series</th><th>from</th><th>to</th><th>slope /day</th><th>R²</th></tr></thead>';
+    tb.innerHTML = '<thead><tr style="position:sticky;top:0;background:var(--panel-2);z-index:1"><th></th><th>#</th><th style="text-align:left">sensor</th><th>from</th><th>to</th><th>slope /day</th><th>R²</th></tr></thead>';
     const tbody = document.createElement('tbody');
-    lines.forEach(l => {
-      const tr = document.createElement('tr'); tr.style.cssText = 'border-top:1px solid var(--line);' + (l.hide ? 'opacity:.45' : '');
-      const f = (l.fit && rec && spec) ? fitSeriesWindow(rec.u, spec, l.nm, l.w1, l.w2) : null;
-      const c0 = document.createElement('td'); c0.style.textAlign = 'center';
-      const cb = document.createElement('input'); cb.type = 'checkbox'; cb.checked = !l.hide; cb.style.cssText = 'width:auto;margin:0'; cb.title = 'tick = show this line on the chart';
-      cb.onchange = () => apply(() => { if (cb.checked) delete l.hide; else l.hide = true; });
-      c0.appendChild(cb); tr.appendChild(c0);
-      const add = (html, st) => { const td = document.createElement('td'); td.style.cssText = 'padding:1px 6px;text-align:center;' + (st || ''); td.innerHTML = html; tr.appendChild(td); };
-      add('#' + l.no, 'font-weight:700');
-      add(l.nm ? escapeHtml(l.nm) : 'hand-drawn', 'text-align:left');
-      add(l.fit ? fmtShort(l.w1) : '', ''); add(l.fit ? fmtShort(l.w2) : '', '');
-      add(f && isFinite(f.a) ? '<b style="color:' + deckSpeedClass(Math.abs(f.a)).c + '">' + (f.a < 0 ? '−' : '+') + Math.abs(f.a * 24).toFixed(Math.abs(f.a * 24) >= 0.01 ? 3 : 4) + '</b>' : '', '');
-      add(f && f.r2 === f.r2 ? f.r2.toFixed(2) : '', '');
-      tbody.appendChild(tr);
+    const dd = t => new Date(t * 1e3).toLocaleDateString('en-GB', { timeZone: 'Asia/Bangkok', day: '2-digit', month: 'short', year: 'numeric' });
+    const tk = c => { const m = /^tilt_(\d+)(?:_(\w+))?$/.exec(c || ''); return m ? [+m[1], m[2] || ''] : [999, c || '']; };
+    const groups = {}; lines.forEach(l => { const g = l.fit ? l.nm : 'hand-drawn'; (groups[g] = groups[g] || []).push(l); });
+    Object.keys(groups).sort((p, q) => { const x = tk(p), y = tk(q); return (x[0] - y[0]) || (x[1] < y[1] ? -1 : x[1] > y[1] ? 1 : 0); }).forEach(g => {
+      const mine = groups[g].slice().sort((p, q) => (p.w1 || 0) - (q.w1 || 0) || p.no - q.no);
+      const on = mine.filter(l => !l.hide).length;
+      const gh = document.createElement('tr'); gh.style.cssText = 'background:var(--panel-2);border-top:1px solid var(--line)';
+      const col = SERIES_COLORS[chartId + '|' + g] || COLOR_DRAWLINE;
+      gh.innerHTML = '<td colspan="7" style="padding:2px 6px;font-weight:700;text-align:left"><span style="color:' + col + '">■</span> ' + escapeHtml(g) +
+        ' <span style="font-weight:400;opacity:.7">· ' + mine.length + (mine.length === 1 ? ' line' : ' lines') + ' · ' + on + ' shown</span></td>';
+      tbody.appendChild(gh);
+      mine.forEach(l => {
+        const tr = document.createElement('tr'); tr.style.cssText = 'border-top:1px solid var(--line);' + (l.hide ? 'opacity:.45' : '');
+        const f = (l.fit && rec && spec) ? fitSeriesWindow(rec.u, spec, l.nm, l.w1, l.w2) : null;
+        const c0 = document.createElement('td'); c0.style.cssText = 'text-align:center;padding-left:6px';
+        const cb = document.createElement('input'); cb.type = 'checkbox'; cb.checked = !l.hide; cb.style.cssText = 'width:auto;margin:0'; cb.title = 'tick = show this line on the chart';
+        cb.onchange = () => apply(() => { if (cb.checked) delete l.hide; else l.hide = true; });
+        c0.appendChild(cb); tr.appendChild(c0);
+        const add = (html, st) => { const td = document.createElement('td'); td.style.cssText = 'padding:1px 6px;text-align:center;' + (st || ''); td.innerHTML = html; tr.appendChild(td); };
+        add('#' + l.no, 'font-weight:700');
+        add(l.nm ? escapeHtml(l.nm) : 'hand-drawn', 'text-align:left');
+        add(l.fit ? dd(l.w1) : '', ''); add(l.fit ? dd(l.w2) : '', '');
+        add(f && isFinite(f.a) ? '<b style="color:' + deckSpeedClass(Math.abs(f.a)).c + '">' + (f.a < 0 ? '−' : '+') + Math.abs(f.a * 24).toFixed(Math.abs(f.a * 24) >= 0.01 ? 3 : 4) + '</b>' : '', '');
+        add(f && f.r2 === f.r2 ? f.r2.toFixed(2) : '', '');
+        tbody.appendChild(tr);
+      });
     });
     tb.appendChild(tbody); wrapT.appendChild(tb); box.appendChild(wrapT); listEl.appendChild(box); }
   // ---- per-line details (fold away when there are many lines)
