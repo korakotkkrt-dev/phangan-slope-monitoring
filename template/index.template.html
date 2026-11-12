@@ -3456,6 +3456,66 @@ function pickFitSeries(u, spec, p1, p2){
   });
   return best;
 }
+// ---- "draw line": every click SNAPS to a real data sample ------------------------------------------------------
+// snapToData(): the nearest sample (in pixels) of any visible series around the cursor; snapSameSeries(): for the END click the
+// sample of the SAME series that is closest in time to the cursor. A sample is skipped when it is empty or fault-flagged
+// (when the fault filter is on), exactly as the least-squares fit skips it.
+function snapOk(u, spec, k, i){
+  const y = u.data[k][i];
+  if (y == null || y !== y) return false;
+  const nm = u.series[k].label;
+  const fault = (thresholds.faultFilterEnabled && spec.primary.chOwner.FAULT) ? spec.primary.chOwner.FAULT[nm] : null;
+  return !(fault && fault[i]);
+}
+function snapToData(u, spec, localX, localY){
+  const rect = u.over.getBoundingClientRect();
+  if (rect.width <= 0) return null;
+  const { xMin, xMax } = resolveXRange(u, spec);
+  if (!(xMax > xMin)) return null;
+  const xs = u.data[0];
+  const xAt = px => xMin + (px / rect.width) * (xMax - xMin);
+  const pxOf = x => ((x - xMin) / (xMax - xMin)) * rect.width;
+  const R = 16;
+  const i0 = Math.max(0, lowerBound(xs, xAt(localX - R), 0, xs.length) - 1);
+  const i1 = Math.min(xs.length - 1, lowerBound(xs, xAt(localX + R), 0, xs.length));
+  const stride = Math.max(1, Math.floor((i1 - i0 + 1) / 500));
+  let best = null;
+  spec.primary.names.forEach((nm, idx) => {
+    const k = idx + 1, s = u.series[k];
+    if (!s || s.show === false) return;
+    const dist = i => Math.hypot(pxOf(xs[i]) - localX, u.valToPos(u.data[k][i], 'y') - localY);
+    let bi = -1, bd = Infinity;
+    for (let i = i0; i <= i1; i += stride){
+      if (!snapOk(u, spec, k, i)) continue;
+      const d = dist(i); if (d < bd){ bd = d; bi = i; }
+    }
+    if (bi < 0) return;
+    if (stride > 1){                       // refine around the coarse winner
+      for (let i = Math.max(i0, bi - stride); i <= Math.min(i1, bi + stride); i++){
+        if (!snapOk(u, spec, k, i)) continue;
+        const d = dist(i); if (d < bd){ bd = d; bi = i; }
+      }
+    }
+    if (!best || bd < best.d) best = { k, nm, i: bi, x: xs[bi], y: u.data[k][bi], d: bd };
+  });
+  return (best && best.d <= 70) ? best : null;
+}
+function snapSameSeries(u, spec, k, xVal){
+  const xs = u.data[0];
+  const j = lowerBound(xs, xVal, 0, xs.length);
+  let best = null;
+  for (let d = 0; d <= 400; d++){
+    for (const i of [j - d, j + d]){
+      if (i < 0 || i >= xs.length || !snapOk(u, spec, k, i)) continue;
+      const dt = Math.abs(xs[i] - xVal);
+      if (!best || dt < best.dt) best = { k, nm: u.series[k].label, i, x: xs[i], y: u.data[k][i], dt };
+    }
+    if (best && d > 0) break;
+  }
+  return best;
+}
+function fmtSnapVal(v, un){ return (Math.abs(v) >= 100 ? v.toFixed(1) : v.toFixed(3)) + (un || ''); }
+
 function fitText(f, un){
   const sg = v => fmtSlope(v);
   return sg(f.a) + ' ' + un + '/h';
@@ -3534,11 +3594,22 @@ function drawUserLinesHook(spec){
         ctx.beginPath(); ctx.arc(px, py, 3 * dpr, 0, 2 * Math.PI);
         ctx.fillStyle = col; ctx.fill();
       });
+      if (ln.fit && ln.snap){   // rings on the two real data samples the clicks snapped to (the line itself is the least-squares line through ALL samples between them)
+        const kk = seriesIdxByName(u, ln.nm);
+        [ln.w1, ln.w2].forEach(wx => {
+          const vy = valueNearX(u, kk, wx);
+          if (vy !== vy) return;
+          const sx = xToPx(wx), sy = u.valToPos(vy, 'y', true);
+          if (sx == null || sy == null || isNaN(sx) || isNaN(sy)) return;
+          ctx.beginPath(); ctx.arc(sx, sy, 6 * dpr, 0, 2 * Math.PI); ctx.lineWidth = 2 * dpr; ctx.strokeStyle = COLOR_PANEL; ctx.stroke();
+          ctx.beginPath(); ctx.arc(sx, sy, 5 * dpr, 0, 2 * Math.PI); ctx.lineWidth = 2 * dpr; ctx.strokeStyle = col; ctx.stroke();
+        });
+      }
       if (ln.fit){
         const f2 = fitSeriesWindow(u, spec, ln.nm, ln.w1, ln.w2), un2 = trendUnitFor(spec);
-        let tcol = col, ttxt = label;
+        let tcol = col, ttxt = label + (ln.snap ? ' ' + ln.nm : '');
         if (f2 && isFinite(f2.a)){
-          ttxt = label + ' ' + fmtSlope(f2.a) + (un2 || '') + '/h';
+          ttxt = ttxt + ' ' + fmtSlope(f2.a) + (un2 || '') + '/h';
           ttxt += ' · ' + fmtShort(f2.xFirst) + '→' + fmtShort(f2.xLast);
           if (un2 === '\u00b0'){ const sc = deckSpeedClass(Math.abs(f2.a)); tcol = sc.c; ttxt += ' ' + sc.k; }
         }
@@ -3546,16 +3617,42 @@ function drawUserLinesHook(spec){
       }
     });
     drawFitTags(ctx, tags, dpr, left, top, width, height);
-    // aiming: the stretch between the first click and the cursor, plus which series it would fit
+    // aiming (draw line): the snapped sample under the cursor, then the stretch to the second snapped sample
     if (preview){
-      const bx1 = xToPx(preview.x1), bx2 = xToPx(preview.x2);
+      const un = trendUnitFor(spec) || '';
+      const col = COLOR_DRAWLINE;
       ctx.save();
-      ctx.globalAlpha = 0.10; ctx.fillStyle = COLOR_DRAWLINE; ctx.fillRect(Math.min(bx1, bx2), top, Math.abs(bx2 - bx1), height);
-      ctx.globalAlpha = 0.8; ctx.strokeStyle = COLOR_DRAWLINE; ctx.lineWidth = 1.5 * dpr; ctx.setLineDash([5 * dpr, 4 * dpr]);
-      [bx1, bx2].forEach(bx => { ctx.beginPath(); ctx.moveTo(bx, top); ctx.lineTo(bx, top + height); ctx.stroke(); });
-      ctx.setLineDash([]); ctx.globalAlpha = 1; ctx.fillStyle = COLOR_DRAWLINE; ctx.textBaseline = 'top';
-      const hrs = Math.abs(preview.x2 - preview.x1) / 3600;
-      ctx.fillText((preview.nm ? 'fits ' + preview.nm : 'no series near these points') + '  ·  ' + (hrs < 48 ? hrs.toFixed(1) + ' h' : (hrs / 24).toFixed(1) + ' d'), Math.min(bx1, bx2) + 4 * dpr, top + 4 * dpr);
+      ctx.setLineDash([]);
+      const ring = (pt, filled) => {
+        const px = xToPx(pt.x), py = u.valToPos(pt.y, 'y', true);
+        ctx.beginPath(); ctx.arc(px, py, (filled ? 4 : 7) * dpr, 0, 2 * Math.PI);
+        if (filled){ ctx.fillStyle = col; ctx.fill(); }
+        ctx.lineWidth = 2 * dpr; ctx.strokeStyle = col; ctx.stroke();
+        return [px, py];
+      };
+      const pill = (txt, x, y) => {
+        ctx.font = (11 * dpr) + 'px "IBM Plex Mono", monospace'; ctx.textBaseline = 'top'; ctx.textAlign = 'left';
+        const w = ctx.measureText(txt).width + 10 * dpr, h = 17 * dpr;
+        const px = Math.min(Math.max(x, left + 2 * dpr), left + width - w - 2 * dpr), py = Math.min(Math.max(y, top + 2 * dpr), top + height - h - 2 * dpr);
+        ctx.globalAlpha = 0.92; ctx.fillStyle = COLOR_PANEL; ctx.fillRect(px, py, w, h);
+        ctx.globalAlpha = 1; ctx.strokeStyle = col; ctx.lineWidth = 1 * dpr; ctx.strokeRect(px, py, w, h);
+        ctx.fillStyle = col; ctx.fillText(txt, px + 5 * dpr, py + 3 * dpr);
+      };
+      if (preview.s1 && !preview.s2){
+        const [px, py] = ring(preview.s1, false);
+        pill('snap \u2192 ' + preview.s1.nm + ' \u00b7 ' + fmtShort(preview.s1.x) + ' \u00b7 ' + fmtSnapVal(preview.s1.y, un) + '  (click to set START)', px + 12 * dpr, py - 26 * dpr);
+      } else if (preview.s1 && preview.s2){
+        const bx1 = xToPx(preview.s1.x), bx2 = xToPx(preview.s2.x);
+        ctx.globalAlpha = 0.10; ctx.fillStyle = col; ctx.fillRect(Math.min(bx1, bx2), top, Math.abs(bx2 - bx1), height); ctx.globalAlpha = 1;
+        const [ax, ay] = ring(preview.s1, true), [bx, by] = ring(preview.s2, false);
+        ctx.setLineDash([5 * dpr, 4 * dpr]); ctx.lineWidth = 1.5 * dpr; ctx.strokeStyle = col;
+        ctx.beginPath(); ctx.moveTo(ax, ay); ctx.lineTo(bx, by); ctx.stroke(); ctx.setLineDash([]);
+        const hrs = Math.abs(preview.s2.x - preview.s1.x) / 3600;
+        const w1 = Math.min(preview.s1.x, preview.s2.x), w2 = Math.max(preview.s1.x, preview.s2.x);
+        const f = (w2 - w1 >= 120) ? fitSeriesWindow(u, spec, preview.s1.nm, w1, w2) : null;
+        pill('snap \u2192 ' + preview.s1.nm + ' \u00b7 ' + (hrs < 48 ? hrs.toFixed(1) + ' h' : (hrs / 24).toFixed(1) + ' d') +
+          (f ? ' \u00b7 slope ' + fmtSlope(f.a) + un + '/h (least squares, n ' + f.n.toLocaleString() + ')' : '') + '  (click to set END)', Math.min(bx1, bx2) + 6 * dpr, top + 6 * dpr);
+      }
       ctx.restore();
     }
     ctx.restore();
@@ -3587,9 +3684,18 @@ function renderDrawLineList(chartId, listEl, onChange){
         body.innerHTML = '<span class="fit-tag" style="background:' + col + '">F' + fitNo + '</span> <b>' + escapeHtml(ln.nm) + '</b> — slope <b>' + fmtSlope(f.a) + ' ' + un + '/h</b> (' + fmtSlope(f.a * 24) + ' ' + un + '/day) · R² ' + (f.r2 === f.r2 ? f.r2.toFixed(3) : 'n/a') + ' · n ' + f.n.toLocaleString() +
           (warns.length ? ' <span class="tr-warn">⚠ ' + warns.join(', ') + '</span>' : '') +
           '<br><span class="n">window ' + fmtDate(f.w1) + ' → ' + fmtDate(f.w2) + ' (' + (hrs < 48 ? hrs.toFixed(1) + ' h' : (hrs / 24).toFixed(1) + ' d') + ') · y = ' + fmtSlope(f.a) + '·t ' + (f.b >= 0 ? '+ ' : '− ') + Math.abs(f.b).toFixed(3) + ' (t in hours from window start)' + (f.excl ? ' · ' + f.excl + ' fault samples left out' : '') + (f.spk ? ' · ' + f.spk.toLocaleString() + ' glitch spikes left out' : '') + '</span>';
+        if (ln.snap){
+          const kk = seriesIdxByName(rec.u, ln.nm);
+          const v1 = valueNearX(rec.u, kk, ln.w1), v2 = valueNearX(rec.u, kk, ln.w2), hh = (ln.w2 - ln.w1) / 3600;
+          const chord = (v1 === v1 && v2 === v2 && hh > 0) ? (v2 - v1) / hh : NaN;
+          const un1 = ln.u || '';
+          body.insertAdjacentHTML('beforeend', '<div class="n">snapped to <b>' + escapeHtml(ln.nm) + '</b>: start ' + fmtDate(ln.w1) + ' = ' + (v1 === v1 ? fmtSnapVal(v1, un1) : 'n/a') +
+            ' \u2192 end ' + fmtDate(ln.w2) + ' = ' + (v2 === v2 ? fmtSnapVal(v2, un1) : 'n/a') + '<br>slope above = least-squares line through every sample between the two clicks' +
+            (chord === chord ? ' \u00b7 straight start\u2192end (two points only) = ' + fmtSlope(chord) + ' ' + un1 + '/h' : '') + '</div>');
+        }
       } else {
         fitNo++;
-        body.innerHTML = '<span class="fit-tag" style="background:' + col + '">F' + fitNo + '</span> <b>' + escapeHtml(ln.nm) + '</b> — <span class="n">not enough data in this window (series hidden, filtered out or missing)</span>';
+        body.innerHTML = '<span class="fit-tag" style="background:' + col + '">F' + fitNo + '</span> <b>' + escapeHtml(ln.nm) + '</b> \u2014 <span class="n">not enough data in this window (series hidden, filtered out or missing)</span>';
       }
       const sel = document.createElement('select');
       sel.title = 'fit this stretch on another series';
@@ -4664,8 +4770,8 @@ function makeChartNow(spec){
     measureBtn.title = 'toggle on, then zoom/pan to the time window you want measured (drag, 6h/24h, or double-click the axis) — the rate (K, degree/hr and degree/day) for every visible channel updates live for whatever window is on screen';
     measureRow.appendChild(measureBtn);
     drawLineBtn = document.createElement('button');
-    drawLineBtn.textContent = 'draw & fit';
-    drawLineBtn.title = 'toggle on, then click the START and the END of the stretch you care about: the line is fitted (least squares) to the data of the series that passes closest to your two clicks. The list below shows which series, the time window, slope and R², and lets you switch to another series.';
+    drawLineBtn.textContent = 'draw line';
+    drawLineBtn.title = 'toggle on, then click the START and the END of the stretch you care about. Each click SNAPS to the nearest real data sample (the series it snapped to is named next to the cursor); the line drawn is the least-squares line through ALL samples of that series between the two clicks, so its slope is the slope of the data over the whole stretch. The list below shows the series, the two snapped samples, slope, R² and the straight start→end slope, and lets you switch to another series.';
     measureRow.appendChild(drawLineBtn);
     wrap.appendChild(measureRow);
     measureReadout = document.createElement('div');
@@ -5022,7 +5128,7 @@ function makeChartNow(spec){
     // still exactly what's needed to render any lines restored from storage.
     requestAnimationFrame(() => { if (drawLineStore[spec.id] && drawLineStore[spec.id].length) refreshDrawLines(); });
 
-    let drawArmed = false, pendingPoint = null, downXY = null, previewRAF = null;
+    let drawArmed = false, pendingPoint = null, downXY = null, previewRAF = null, lastMove = null;
     const clearPreview = () => {
       if (previewRAF){ cancelAnimationFrame(previewRAF); previewRAF = null; }
       if (drawPreview[spec.id]){ delete drawPreview[spec.id]; u.redraw(); }
@@ -5031,30 +5137,36 @@ function makeChartNow(spec){
       drawArmed = !drawArmed;
       pendingPoint = null; downXY = null;
       clearPreview();
-      drawLineBtn.textContent = drawArmed ? 'draw & fit: on' : 'draw & fit';
+      drawLineBtn.textContent = drawArmed ? 'draw line: on' : 'draw line';
       drawLineBtn.classList.toggle('on', drawArmed);
       u.over.style.cursor = drawArmed ? 'crosshair' : '';
     };
     u.over.addEventListener('mousedown', e => { if (drawArmed) downXY = { x: e.clientX, y: e.clientY }; });
-    // Rubber-band preview: once the first point is placed, follow the cursor
-    // with a dashed line back to it (and a live K estimate) so there's
-    // something concrete to aim the second click against, instead of
-    // guessing blind until it's committed. Throttled to one redraw per
-    // frame — plain mousemove fires far faster than that.
+    // Snap preview: before the first click the sample that would be picked (and its series) is ringed under the cursor; after the
+    // first click a dashed line follows the cursor, snapped to the SAME series, with the live least-squares slope of the stretch.
+    // Throttled to one redraw per frame.
     u.over.addEventListener('mousemove', e => {
-      if (!drawArmed || !pendingPoint) return;
-      const rect = u.over.getBoundingClientRect();
-      if (rect.width <= 0) return;
-      const { xMin, xMax } = resolveXRange(u, spec);
-      const xVal = xMin + ((e.clientX - rect.left) / rect.width) * (xMax - xMin);
-      const yVal = u.posToVal(e.clientY - rect.top, 'y');
-      if (xVal == null || yVal == null || isNaN(xVal) || isNaN(yVal)) return;
-      const pk = pickFitSeries(u, spec, pendingPoint, { x: xVal, y: yVal });
-      drawPreview[spec.id] = { x1: pendingPoint.x, y1: pendingPoint.y, x2: xVal, y2: yVal, nm: pk ? pk.nm : null };
+      if (!drawArmed) return;
+      lastMove = { cx: e.clientX, cy: e.clientY };
       if (previewRAF) return;
-      previewRAF = requestAnimationFrame(() => { previewRAF = null; u.redraw(); });
+      previewRAF = requestAnimationFrame(() => {
+        previewRAF = null;
+        if (!drawArmed || !lastMove) return;
+        const rect = u.over.getBoundingClientRect();
+        if (rect.width <= 0) return;
+        if (!pendingPoint){
+          const sn = snapToData(u, spec, lastMove.cx - rect.left, lastMove.cy - rect.top);
+          if (sn) drawPreview[spec.id] = { s1: sn }; else delete drawPreview[spec.id];
+        } else {
+          const { xMin, xMax } = resolveXRange(u, spec);
+          const xVal = xMin + ((lastMove.cx - rect.left) / rect.width) * (xMax - xMin);
+          const s2 = snapSameSeries(u, spec, pendingPoint.k, xVal);
+          drawPreview[spec.id] = { s1: pendingPoint, s2: s2 || undefined };
+        }
+        u.redraw();
+      });
     });
-    u.over.addEventListener('mouseleave', () => clearPreview());
+    u.over.addEventListener('mouseleave', () => { if (!pendingPoint) clearPreview(); });
     u.over.addEventListener('mouseup', e => {
       if (!drawArmed || !downXY) return;
       const moved = Math.hypot(e.clientX - downXY.x, e.clientY - downXY.y);
@@ -5062,26 +5174,25 @@ function makeChartNow(spec){
       if (moved > 4) return; // a drag (pan/zoom-select), not a point placement — leave it to uPlot's own cursor handling
       const rect = u.over.getBoundingClientRect();
       if (rect.width <= 0) return;
-      // x: same null-scale caveat as resolveXRange() above — go through the
-      // resolved range and a plain CSS-pixel fraction instead of
-      // u.posToVal(pos, 'x'), which divides by the (possibly still unset)
-      // internal scale bounds and silently returns 0 on an unzoomed chart.
+      if (!pendingPoint){
+        const sn = snapToData(u, spec, e.clientX - rect.left, e.clientY - rect.top);
+        if (!sn) return;                       // nothing close enough to snap to
+        pendingPoint = sn;
+        drawPreview[spec.id] = { s1: sn };
+        u.redraw();
+        return;
+      }
+      // same x-range caveat as resolveXRange(): go through the resolved range, not u.posToVal(pos,'x')
       const { xMin, xMax } = resolveXRange(u, spec);
       const xVal = xMin + ((e.clientX - rect.left) / rect.width) * (xMax - xMin);
-      const yVal = u.posToVal(e.clientY - rect.top, 'y');
-      if (xVal == null || yVal == null || isNaN(xVal) || isNaN(yVal)) return;
-      if (!pendingPoint){ pendingPoint = { x: xVal, y: yVal }; return; }
-      const p1 = pendingPoint, p2 = { x: xVal, y: yVal };
+      const s2 = snapSameSeries(u, spec, pendingPoint.k, xVal);
+      const s1 = pendingPoint;
+      if (!s2) return;
+      const w1 = Math.min(s1.x, s2.x), w2 = Math.max(s1.x, s2.x);
+      if (w2 - w1 < 120) return;               // both clicks on the same sample: wait for a different END point
       pendingPoint = null;
       clearPreview();
-      const pick = pickFitSeries(u, spec, p1, p2);
-      const w1 = Math.min(p1.x, p2.x), w2 = Math.max(p1.x, p2.x);
-      if (pick && w2 - w1 >= 120){
-        (drawLineStore[spec.id] = drawLineStore[spec.id] || []).push({ id: drawLineIdSeq++, fit: true, nm: pick.nm, c: SERIES_COLORS[spec.id + '|' + pick.nm], u: trendUnit || '', w1, w2 });
-      } else {
-        const { x1, y1, x2, y2 } = lineStats(p1.x, p1.y, p2.x, p2.y);
-        (drawLineStore[spec.id] = drawLineStore[spec.id] || []).push({ id: drawLineIdSeq++, x1, y1, x2, y2 });
-      }
+      (drawLineStore[spec.id] = drawLineStore[spec.id] || []).push({ id: drawLineIdSeq++, fit: true, snap: true, nm: s1.nm, c: SERIES_COLORS[spec.id + '|' + s1.nm], u: trendUnit || '', w1, w2 });
       saveDrawLineStore();
       refreshDrawLines();
     });
@@ -5222,9 +5333,9 @@ function buildEnvelopePoints(days, totals, rolling3, fromEpoch, toEpoch){
     if (isNaN(totals[i]) || isNaN(rolling3[i])) continue;
     pts.push({ t: days[i], x: rolling3[i], y: totals[i] });
   }
-  if (!pts.length) return { xs: [], ys: [], latestPt: null };
+  if (!pts.length) return { xs: [], ys: [], ts: [], latestPt: null };
   pts.sort((a, b) => a.t - b.t);
-  return { xs: pts.map(p => p.x), ys: pts.map(p => p.y), latestPt: pts[pts.length - 1] };
+  return { xs: pts.map(p => p.x), ys: pts.map(p => p.y), ts: pts.map(p => p.t), latestPt: pts[pts.length - 1] };
 }
 function makeEnvelopeChart(spec){
   const st = spec.chOwner;
@@ -5265,6 +5376,24 @@ function makeEnvelopeChart(spec){
   toLbl.appendChild(toInput);
   ctrlRow.append(fromLbl, toLbl, applyBtn, resetBtn);
   wrap.appendChild(ctrlRow);
+  fromInput.min = toInput.min = bkkDateStr(days[0]);
+  fromInput.max = toInput.max = bkkDateStr(days[days.length - 1]);
+  // quick ranges, counted back from the last day with data (the whole measured period is "all")
+  const presetRow = document.createElement('div');
+  presetRow.className = 'view-toggle envelope-controls';
+  const presetBtns = [];
+  [['all measured days', 0], ['last 7 d', 7], ['last 14 d', 14], ['last 30 d', 30], ['last 60 d', 60]].forEach(([txt, n]) => {
+    const b = document.createElement('button'); b.textContent = txt; b.dataset.n = n;
+    b.onclick = () => {
+      const last = days[days.length - 1];
+      const first = n ? Math.max(days[0], last - (n - 1) * 86400) : days[0];
+      fromInput.value = bkkDateStr(first); toInput.value = bkkDateStr(last);
+      build(first, last + 86400 - 1);
+      presetBtns.forEach(x => x.classList.toggle('on', x === b));
+    };
+    presetBtns.push(b); presetRow.appendChild(b);
+  });
+  wrap.appendChild(presetRow);
 
   // set the AP-Model level 1 (watch) / level 2 (critical) rainfall criteria
   // directly on this chart — the same shared thresholds.rainDaily/rain3day
@@ -5320,11 +5449,20 @@ function makeEnvelopeChart(spec){
 
   document.getElementById('charts').appendChild(wrap);
 
+  holder.style.position = 'relative';
+  const tip = document.createElement('div');
+  tip.className = 'env-tip';
+  tip.style.cssText = 'position:absolute;display:none;pointer-events:none;z-index:5;background:var(--panel,#fff);color:var(--ink,#141413);border:1px solid var(--line,#999);border-radius:6px;padding:5px 8px;font:11px "IBM Plex Mono",monospace;line-height:1.5;box-shadow:0 2px 8px rgba(0,0,0,.25);white-space:nowrap';
+  holder.appendChild(tip);
+  let hoverIdx = -1, curPts = { xs: [], ys: [], ts: [] };
+  const fmtDay = t => new Date((t + 7 * 3600) * 1000).toLocaleDateString('en-GB', { timeZone: 'UTC', weekday: 'short', day: '2-digit', month: 'short', year: 'numeric' });
+  const levelOf = (v, w, c) => (c != null && v >= c) ? ' \u2265 critical' : (w != null && v >= w) ? ' \u2265 watch' : '';
   const entry = { wrap, u: null, section: spec.section, hasSecondary: false, isEnvelope: true };
   envTools.appendChild(makePngButton(() => entry.u && entry.u.ctx.canvas, spec.id));
 
   function build(fromEpoch, toEpoch){
-    const { xs, ys, latestPt } = buildEnvelopePoints(days, totals, rolling3, fromEpoch, toEpoch);
+    const { xs, ys, ts, latestPt } = buildEnvelopePoints(days, totals, rolling3, fromEpoch, toEpoch);
+    curPts = { xs, ys, ts }; hoverIdx = -1; tip.style.display = 'none';
     if (entry.u) entry.u.destroy();
     entry.u = newUPlot({
       width: holder.clientWidth || 900,
@@ -5343,10 +5481,53 @@ function makeEnvelopeChart(spec){
         { label: 'rainfall path', stroke: dotColor, width: 1.5, points: { show: true, size: 5, fill: dotColor, stroke: dotColor } },
       ],
       legend: { show: false },
-      hooks: { draw: [ drawThresholdsHook(envelopeThresholds), drawLatestPointHook(() => latestPt) ] },
+      hooks: { draw: [ drawThresholdsHook(envelopeThresholds), drawLatestPointHook(() => latestPt), u => {
+        // dates: first day of the range always labelled, hovered day ringed
+        if (!curPts.xs.length) return;
+        const { ctx } = u, dpr = devicePixelRatio || 1;
+        ctx.save();
+        ctx.beginPath(); ctx.rect(u.bbox.left, u.bbox.top, u.bbox.width, u.bbox.height); ctx.clip();
+        ctx.font = (10 * dpr) + 'px "IBM Plex Mono", monospace'; ctx.textBaseline = 'bottom'; ctx.fillStyle = COLOR_INK || '#141413';
+        const lab = (i, dx, dy) => { const px = u.valToPos(curPts.xs[i], 'x', true), py = u.valToPos(curPts.ys[i], 'y', true); ctx.fillText(fmtShort(curPts.ts[i]).replace(/,? \d\d:\d\d$/, ''), px + dx * dpr, py + dy * dpr); };
+        lab(0, 6, -6);
+        if (hoverIdx >= 0){
+          const px = u.valToPos(curPts.xs[hoverIdx], 'x', true), py = u.valToPos(curPts.ys[hoverIdx], 'y', true);
+          ctx.lineWidth = 2 * dpr; ctx.strokeStyle = dotColor; ctx.fillStyle = COLOR_PANEL;
+          ctx.beginPath(); ctx.arc(px, py, 8 * dpr, 0, 2 * Math.PI); ctx.fill(); ctx.stroke();
+          ctx.beginPath(); ctx.arc(px, py, 3.5 * dpr, 0, 2 * Math.PI); ctx.fillStyle = dotColor; ctx.fill();
+        }
+        ctx.restore();
+      } ] },
     }, [xs, ys], holder);
+    // hover / tap: nearest day within 18 px tells its date and both rainfall values
+    const over = entry.u.over;
+    const showTip = (cx, cy) => {
+      const rect = over.getBoundingClientRect();
+      const lx = cx - rect.left, ly = cy - rect.top;
+      let bi = -1, bd = 18;
+      for (let i = 0; i < curPts.xs.length; i++){
+        const d = Math.hypot(entry.u.valToPos(curPts.xs[i], 'x') - lx, entry.u.valToPos(curPts.ys[i], 'y') - ly);
+        if (d < bd){ bd = d; bi = i; }
+      }
+      if (bi !== hoverIdx){ hoverIdx = bi; entry.u.redraw(false); }
+      if (bi < 0){ tip.style.display = 'none'; over.style.cursor = ''; return; }
+      over.style.cursor = 'pointer';
+      const dy = curPts.ys[bi], d3 = curPts.xs[bi];
+      tip.innerHTML = '<b>' + fmtDay(curPts.ts[bi]) + '</b><br>daily ' + dy.toFixed(1) + ' mm' + levelOf(dy, thresholds.rainDaily.warn, thresholds.rainDaily.crit) +
+        '<br>3-day ' + d3.toFixed(1) + ' mm' + levelOf(d3, thresholds.rain3day.warn, thresholds.rain3day.crit) + '<br><span style="opacity:.65">day ' + (bi + 1) + ' of ' + curPts.xs.length + ' in range</span>';
+      tip.style.display = 'block';
+      const hr = holder.getBoundingClientRect();
+      let tx = cx - hr.left + 14, ty = cy - hr.top - 12;
+      if (tx + tip.offsetWidth > hr.width - 4) tx = cx - hr.left - tip.offsetWidth - 14;
+      if (ty + tip.offsetHeight > hr.height - 4) ty = hr.height - tip.offsetHeight - 4;
+      tip.style.left = Math.max(2, tx) + 'px'; tip.style.top = Math.max(2, ty) + 'px';
+    };
+    over.addEventListener('mousemove', e => showTip(e.clientX, e.clientY));
+    over.addEventListener('mouseleave', () => { hoverIdx = -1; tip.style.display = 'none'; entry.u.redraw(false); });
+    over.addEventListener('click', e => showTip(e.clientX, e.clientY));
+    over.addEventListener('touchstart', e => { const t = e.touches[0]; if (t) showTip(t.clientX, t.clientY); }, { passive: true });
     caption.textContent = latestPt
-      ? 'most recent in range: ' + fmtDate(latestPt.t) + ' — daily ' + latestPt.y.toFixed(1) + ' mm, 3-day cumulative ' + latestPt.x.toFixed(1) + ' mm'
+      ? 'range ' + fmtDay(ts[0]) + ' → ' + fmtDay(latestPt.t) + ' (' + xs.length + ' days) · most recent in range: ' + fmtDate(latestPt.t) + ' — daily ' + latestPt.y.toFixed(1) + ' mm, 3-day cumulative ' + latestPt.x.toFixed(1) + ' mm · point at a dot to see its date'
       : 'no data in the selected range.';
   }
   build(days[0], days[days.length - 1] + 86400 - 1);
@@ -5358,7 +5539,9 @@ function makeEnvelopeChart(spec){
     if (!isFinite(f) || !isFinite(t) || f > t) return;
     build(f, t);
   };
+  fromInput.onchange = toInput.onchange = () => { presetBtns.forEach(x => x.classList.remove('on')); applyBtn.onclick(); };
   resetBtn.onclick = () => {
+    presetBtns.forEach(x => x.classList.toggle('on', x.dataset.n === '0'));
     fromInput.value = bkkDateStr(days[0]);
     toInput.value = bkkDateStr(days[days.length - 1]);
     build(days[0], days[days.length - 1] + 86400 - 1);
@@ -8088,7 +8271,7 @@ function init(){
 
   const gFit = grp(anaB, 'Fit a line');
   btn(gFit, '', 'Trendline', () => chartTool('trendline'), 'straight line through the window you are looking at (zoom first)');
-  btn(gFit, '', 'Draw & fit', () => chartTool('draw'), 'click two points on the chart; the nearest series is fitted');
+  btn(gFit, '', 'Draw line', () => chartTool('draw'), 'click a START and an END point; both snap to real data samples and the slope of that series over the whole stretch is shown');
   btn(gFit, '', 'Measure rate', () => chartTool('measure'), 'rate of change in degrees per hour over the zoomed window');
   const gSlide = grp(anaB, 'Slide method');
   btn(gSlide, '', 'Auto trend lines', () => { if (window.PSWTrendsUI) PSWTrendsUI.open(); }, 'step-corrected daily tilt with trend lines for every stretch, speed classes, a table, and its own Filter and Shift - the same analysis as the slides');
