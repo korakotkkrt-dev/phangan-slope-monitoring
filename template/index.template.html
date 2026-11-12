@@ -3595,9 +3595,9 @@ function drawUserLinesHook(spec){
       });
       if (ln.fit){
         const f2 = fitCache, un2 = trendUnitFor(spec);
-        let tcol = col, ttxt = label + (ln.snap ? ' ' + ln.nm : '');
+        let tcol = col, ttxt = label;
         if (f2 && isFinite(f2.a)){
-          ttxt = ttxt + ' ' + fmtSlope(f2.a * 24) + (un2 || '') + '/day'; ttxt += ' · ' + fmtShort(f2.xFirst) + '→' + fmtShort(f2.xLast);
+          ttxt = ttxt + ' ' + fmtSlope(f2.a * 24) + (un2 || '') + '/day';    // short tag like the slides ('#14 +0.0008'); series and dates are in the list below the chart
           if (un2 === '\u00b0'){ const sc = deckSpeedClass(Math.abs(f2.a)); tcol = sc.c; }
         }
         tags.push({ text: ttxt, x: px2, y: py2, col: tcol });
