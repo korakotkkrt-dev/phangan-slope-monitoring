@@ -870,7 +870,7 @@ button.chat-dl-btn:disabled{opacity:.55;cursor:default}
     <b>&larr; back</b> or <kbd>Backspace</kbd> undoes one step &middot;
     <b>&#8962; home</b> or <kbd>Home</kbd> resets everything &middot; shift-drag to pan &middot; click a legend entry to isolate a channel</div>
   <div class="hint" id="hint-analysis" style="display:none">this page holds the <b>derived</b> views: the Rainfall Envelope (AP-Model, with its own watch/critical fields right on the chart), Tilt Rate (K, degree/hr), and a build-your-own <b>Compare</b> chart (either Y axis: tilt, tilt rate, soil moisture, or rainfall rate, vs time) &middot;
-    <b>measure rate</b> toggle on, then zoom/pan the chart to the window you want &mdash; K per channel updates live, sorted by |K| &middot;
+    <b>draw &amp; fit</b> toggle on, then drag along a curve from the start to the end of the stretch you care about &mdash; the line fits itself and its slope (degree/day), time range and series are listed in the table under the chart &middot;
     the <b>Rainfall envelope</b> chart plots 3-day cumulative vs. daily rainfall against the diagonal AP-Model criteria lines, with a from&ndash;to date filter and the latest day marked in red &middot;
     <b>settings</b> and the zoom/pan controls work the same as on the Sensor Readings page</div>
   <div id="charts"></div>
@@ -4975,6 +4975,9 @@ function makeChartNow(spec){
     trendReadout.style.display = 'none';
     wrap.appendChild(trendReadout);
   }
+  // 'draw & fit' does what 'measure rate' (quick K) and 'trendline' (least-squares line) did, for the stretch you draw, and keeps the lines in a table:
+  // on the charts that have it, those two buttons are taken out so the same job is not offered three times (charts without draw & fit keep their trendline)
+  if (spec.measurable) [measureBtn, trendBtn, trendPinBtn, trendCopyBtn, trendClearBtn].forEach(b => { if (b && b.parentNode) b.parentNode.removeChild(b); });
   const legend = document.createElement('div');
   legend.className = 'legend';
   wrap.appendChild(legend);
@@ -7902,7 +7905,7 @@ const REFERENCE_ANSWERS = [
       ['warning tilt', 4], ['เตือนภัย tilt', 4], ['ความเร็วการเคลื่อนตัว', 3], ['องศาต่อชั่วโมง', 3],
       ['°/ชม', 2], ['deg/hr', 2], ['degree/hr', 2], ['จุดเริ่มเตือน', 3], ['ค่าไหนถือว่าอันตราย', 3],
     ],
-    text: 'เกณฑ์อัตราเอียง (tilt rate, K) อ้างอิงจากงานวิจัยที่ใช้ tilt sensor เฝ้าระวังลาดดินโดยตรง 2 ฉบับ — Uchimura et al. (2015, Soils and Foundations 55(5)) เสนอเกณฑ์ precaution ที่ 0.01°/ชม. และเกณฑ์ warning ให้อพยพที่ 0.1°/ชม. — Sheikh et al. (2021, Soils and Foundations 61) จำแนกความเร็วการเคลื่อนตัวจากอัตราเอียงเป็น 4 ระดับ: very slow (<0.004°/ชม.), slow (0.004-0.04°/ชม.), moderate (0.04-0.4°/ชม.), rapid (>0.4°/ชม.) และกำหนดจุดเริ่ม warning ที่ 0.004°/ชม. — ใช้ปุ่ม "measure rate" บนกราฟ Inclination หรือ Compare เพื่อดูค่า K ปัจจุบันของช่องสัญญาณที่สนใจ แล้วเทียบกับเกณฑ์นี้ได้โดยตรง',
+    text: 'เกณฑ์อัตราเอียง (tilt rate, K) อ้างอิงจากงานวิจัยที่ใช้ tilt sensor เฝ้าระวังลาดดินโดยตรง 2 ฉบับ — Uchimura et al. (2015, Soils and Foundations 55(5)) เสนอเกณฑ์ precaution ที่ 0.01°/ชม. และเกณฑ์ warning ให้อพยพที่ 0.1°/ชม. — Sheikh et al. (2021, Soils and Foundations 61) จำแนกความเร็วการเคลื่อนตัวจากอัตราเอียงเป็น 4 ระดับ: very slow (<0.004°/ชม.), slow (0.004-0.04°/ชม.), moderate (0.04-0.4°/ชม.), rapid (>0.4°/ชม.) และกำหนดจุดเริ่ม warning ที่ 0.004°/ชม. — ใช้ปุ่ม "draw & fit" บนกราฟ Inclination หรือ Compare ลากเส้นตามช่วงที่สนใจเพื่อดูความชัน (องศา/วัน และสถานะความเร็ว) แล้วเทียบกับเกณฑ์นี้ได้โดยตรง',
   },
   {
     key: 'soilStation',
@@ -8508,9 +8511,7 @@ function init(){
   btn(gUndo, '', 'Undo zoom', () => back.click(), 'go back one zoom step (Backspace)');
 
   const gFit = grp(anaB, 'Fit a line');
-  btn(gFit, '', 'Trendline', () => chartTool('trendline'), 'straight line through the window you are looking at (zoom first)');
-  btn(gFit, '', 'Draw line', () => chartTool('draw'), 'click a START and an END point; both snap to real data samples and the slope of that series over the whole stretch is shown');
-  btn(gFit, '', 'Measure rate', () => chartTool('measure'), 'rate of change in degrees per hour over the zoomed window');
+  btn(gFit, '', 'Draw & fit', () => chartTool('draw'), 'draw a line along the data (drag from the start to the end); the start snaps to the nearest curve, the line then fits itself (least squares) and its slope, time range and series are listed under the chart');
   const gSlide = grp(anaB, 'Slide method');
   btn(gSlide, '', 'Auto trend lines', () => { if (window.PSWTrendsUI) PSWTrendsUI.open(); }, 'step-corrected daily tilt with trend lines for every stretch, speed classes, a table, and its own Filter and Shift - the same analysis as the slides');
   const gRel = grp(anaB, 'Tilt view');
