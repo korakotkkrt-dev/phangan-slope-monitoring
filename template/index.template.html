@@ -3375,6 +3375,7 @@ function nextLineNo(chartId){ const a = drawLineStore[chartId] || []; return a.r
 // gesture). Per user feedback: the committed line's slope was correct, but
 // there was nothing to gauge against while moving toward the second point.
 const drawPreview = {}; // { [chartId]: {x1,y1,x2,y2} | undefined }
+const drawAnim = {};    // { [lineId]: {t0,x1,y1,x2,y2} } the hand stroke that morphs into the fitted line
 Object.keys(drawLineStore).forEach(k => (drawLineStore[k] || []).forEach(ln => {
   if (typeof ln.id === 'number' && ln.id >= drawLineIdSeq) drawLineIdSeq = ln.id + 1;
 }));
@@ -3605,7 +3606,7 @@ function drawUserLinesHook(spec){
     ctx.font = (11 * dpr) + 'px "IBM Plex Mono", monospace';
     ctx.textBaseline = 'bottom';
     const tags = [], slideTags = [];
-    let fitNo = 0;
+    let fitNo = 0, animActive = false;
     (lines || []).forEach(ln => {
       if (ln.hide) return;
       let x1 = ln.x1, y1 = ln.y1, x2 = ln.x2, y2 = ln.y2, label, col = ln.c || COLOR_DRAWLINE, fitCache = null;
@@ -3618,6 +3619,12 @@ function drawUserLinesHook(spec){
         x1 = f.xFirst; x2 = f.xLast; y1 = f.a * (x1 - f.t0) / 3600 + f.b; y2 = f.a * (x2 - f.t0) / 3600 + f.b;
         // only the slope line is drawn: no shading behind it
         label = '#' + (ln.no || ++fitNo);
+        { const an = drawAnim[ln.id];      // right after drawing: start from the user's own stroke and slide onto the fitted line
+          if (an){
+            const p = Math.min(1, (performance.now() - an.t0) / 750);
+            if (p >= 1) delete drawAnim[ln.id];
+            else { animActive = true; const e = p * p * (3 - 2 * p); x1 = an.x1 + (x1 - an.x1) * e; y1 = an.y1 + (y1 - an.y1) * e; x2 = an.x2 + (x2 - an.x2) * e; y2 = an.y2 + (y2 - an.y2) * e; }
+          } }
       } else {
         const { K } = lineStats(x1, y1, x2, y2);
         label = 'K ≈ ' + (K >= 0 ? '+' : '') + K.toFixed(4) + (ln.u || '°') + '/hr';
@@ -3637,15 +3644,16 @@ function drawUserLinesHook(spec){
       });
       if (ln.fit){
         const f2 = fitCache, un2 = trendUnitFor(spec);
-        let tcol = col, ttxt = label;
+        let tcol = col, ttxt = label + ' ' + ln.nm;
         if (f2 && isFinite(f2.a)){
-          { const dv = f2.a * 24, av = Math.abs(dv); ttxt = ttxt + ' ' + (dv < 0 ? '\u2212' : '+') + av.toFixed(av >= 0.01 ? 3 : 4); }    // as on the slides: '#26 \u22120.0054' (degree/day); series and dates are in the list below the chart
-          if (un2 === '\u00b0'){ const sc = deckSpeedClass(Math.abs(f2.a)); tcol = sc.c; }
+          { const dv = f2.a * 24, av = Math.abs(dv); ttxt = ttxt + ' ' + (dv < 0 ? '\u2212' : '+') + av.toFixed(av >= 0.01 ? 3 : 4) + ' \u00b0/day'; }    // as on the slides: '#26 \u22120.0054' (degree/day); series and dates are in the list below the chart
+          if (un2 === '\u00b0'){ const sc = deckSpeedClass(Math.abs(f2.a)); tcol = sc.c; ttxt += ' ' + sc.k; }
         }
         slideTags.push({ text: ttxt, x: (px1 + px2) / 2, y: (py1 + py2) / 2, col: tcol });
       }
     });
     drawSlideTags(ctx, slideTags, dpr, left, top, width, height);
+    if (animActive) requestAnimationFrame(() => u.redraw());
     // aiming (draw line): the snapped sample under the cursor, then the stretch to the second snapped sample
     if (preview){
       const un = trendUnitFor(spec) || '';
@@ -3667,7 +3675,19 @@ function drawUserLinesHook(spec){
         ctx.globalAlpha = 1; ctx.strokeStyle = col; ctx.lineWidth = 1 * dpr; ctx.strokeRect(px, py, w, h);
         ctx.fillStyle = col; ctx.fillText(txt, px + 5 * dpr, py + 3 * dpr);
       };
-      if (preview.s1 && !preview.s2){
+      if (preview.drag && preview.cur){
+        const [ax, ay] = ring(preview.s1, true);
+        const cx = xToPx(preview.cur.x), cy = u.valToPos(preview.cur.y, 'y', true);
+        ctx.setLineDash([]); ctx.lineWidth = 2.8 * dpr; ctx.strokeStyle = col; ctx.lineCap = 'round';
+        ctx.beginPath(); ctx.moveTo(ax, ay); ctx.lineTo(cx, cy); ctx.stroke();
+        ctx.beginPath(); ctx.arc(cx, cy, 3.5 * dpr, 0, 2 * Math.PI); ctx.fillStyle = col; ctx.fill();
+        let txt = 'drawing on ' + preview.s1.nm;
+        if (preview.s2 && Math.abs(preview.s2.x - preview.s1.x) >= 120){
+          const f = fitSeriesWindow(u, spec, preview.s1.nm, Math.min(preview.s1.x, preview.s2.x), Math.max(preview.s1.x, preview.s2.x));
+          if (f) txt += ' \u00b7 slope ' + (f.a < 0 ? '\u2212' : '+') + Math.abs(f.a * 24).toFixed(Math.abs(f.a * 24) >= 0.01 ? 3 : 4) + ' ' + un + '/day';
+        }
+        pill(txt + '  (release: the line fits itself to the data)', Math.min(ax, cx) + 6 * dpr, top + 6 * dpr);
+      } else if (preview.s1 && !preview.s2){
         const [px, py] = ring(preview.s1, false);
         pill('snap \u2192 ' + preview.s1.nm + ' \u00b7 ' + fmtShort(preview.s1.x) + ' \u00b7 ' + fmtSnapVal(preview.s1.y, un) + (preview.hover ? '  (click to set START)' : '  (click to set END \u00b7 right-click = new start)'), px + 12 * dpr, py - 26 * dpr);
       } else if (preview.s1 && preview.s2){
@@ -3687,6 +3707,8 @@ function drawUserLinesHook(spec){
   };
 }
 
+function bkkInputStr(t){ const d = new Date((t + 7 * 3600) * 1000), p = n => String(n).padStart(2, '0'); return d.getUTCFullYear() + '-' + p(d.getUTCMonth() + 1) + '-' + p(d.getUTCDate()) + 'T' + p(d.getUTCHours()) + ':' + p(d.getUTCMinutes()); }
+function bkkInputToEpoch(str){ const m = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})$/.exec(str || ''); return m ? Date.UTC(+m[1], +m[2] - 1, +m[3], +m[4], +m[5]) / 1000 - 7 * 3600 : NaN; }
 function renderDrawLineList(chartId, listEl, onChange){
   const lines = drawLineStore[chartId] || [];
   if (!lines.length){ listEl.innerHTML = ''; listEl.style.display = 'none'; return; }
@@ -3713,7 +3735,7 @@ function renderDrawLineList(chartId, listEl, onChange){
     { const t = document.createElement('span'); t.className = 'n'; t.textContent = 'tick a line to show it on the chart · lines are grouped by sensor'; bar.appendChild(t); }
     box.appendChild(bar);
     const wrapT = document.createElement('div'); wrapT.style.cssText = 'max-height:300px;overflow:auto;border:1px solid var(--line);border-radius:4px;background:var(--panel)';
-    const tb = document.createElement('table'); tb.style.cssText = 'border-collapse:collapse;width:100%;font:11px "IBM Plex Mono",monospace';
+    const tb = document.createElement('table'); tb.style.cssText = 'border-collapse:collapse;width:100%;font:12px "IBM Plex Mono",monospace';
     tb.innerHTML = '<thead><tr style="position:sticky;top:0;background:var(--panel-2);z-index:1"><th></th><th>#</th><th style="text-align:left">sensor</th><th>from</th><th>to</th><th>slope /day</th><th>R²</th></tr></thead>';
     const tbody = document.createElement('tbody');
     const dd = t => new Date(t * 1e3).toLocaleDateString('en-GB', { timeZone: 'Asia/Bangkok', day: '2-digit', month: 'short', year: 'numeric' });
@@ -3737,7 +3759,21 @@ function renderDrawLineList(chartId, listEl, onChange){
         const add = (html, st) => { const td = document.createElement('td'); td.style.cssText = 'padding:1px 6px;text-align:center;' + (st || ''); td.innerHTML = html; tr.appendChild(td); };
         add('#' + l.no, 'font-weight:700');
         add(l.nm ? escapeHtml(l.nm) : 'hand-drawn', 'text-align:left');
-        add(l.fit ? dd(l.w1) : '', ''); add(l.fit ? dd(l.w2) : '', '');
+        ['w1', 'w2'].forEach(key => {
+          const td = document.createElement('td'); td.style.cssText = 'padding:2px 4px;text-align:center';
+          if (l.fit){
+            const inp = document.createElement('input'); inp.type = 'datetime-local'; inp.value = bkkInputStr(l[key]);
+            inp.title = 'Asia/Bangkok time \u2014 edit it to trim or extend this line; the line refits to the data by itself';
+            inp.style.cssText = 'width:182px;font:700 13px "IBM Plex Mono",monospace;color:var(--ink);background:var(--panel);border:1.5px solid var(--accent,var(--line));border-radius:4px;padding:2px 4px';
+            inp.onchange = () => {
+              const t = bkkInputToEpoch(inp.value), n1 = key === 'w1' ? t : l.w1, n2 = key === 'w2' ? t : l.w2;
+              if (!(t === t) || n2 - n1 < 120){ inp.value = bkkInputStr(l[key]); return; }   // invalid or inverted: put the old time back
+              apply(() => { l.w1 = n1; l.w2 = n2; });
+            };
+            td.appendChild(inp);
+          }
+          tr.appendChild(td);
+        });
         add(f && isFinite(f.a) ? '<b style="color:' + deckSpeedClass(Math.abs(f.a)).c + '">' + (f.a < 0 ? '−' : '+') + Math.abs(f.a * 24).toFixed(Math.abs(f.a * 24) >= 0.01 ? 3 : 4) + '</b>' : '', '');
         add(f && f.r2 === f.r2 ? f.r2.toFixed(2) : '', '');
         tbody.appendChild(tr);
@@ -3763,7 +3799,7 @@ function renderDrawLineList(chartId, listEl, onChange){
         fitNo++;
         body.innerHTML = '<span class="fit-tag" style="background:' + col + '">#' + (ln.no || fitNo) + '</span> <b>' + escapeHtml(ln.nm) + '</b> — slope <b>' + fmtSlope(f.a) + ' ' + un + '/h</b> (' + fmtSlope(f.a * 24) + ' ' + un + '/day) · R² ' + (f.r2 === f.r2 ? f.r2.toFixed(3) : 'n/a') + ' · n ' + f.n.toLocaleString() +
           (warns.length ? ' <span class="tr-warn">⚠ ' + warns.join(', ') + '</span>' : '') +
-          '<br><span class="n">window ' + fmtDate(f.w1) + ' → ' + fmtDate(f.w2) + ' (' + (hrs < 48 ? hrs.toFixed(1) + ' h' : (hrs / 24).toFixed(1) + ' d') + ') · y = ' + fmtSlope(f.a) + '·t ' + (f.b >= 0 ? '+ ' : '− ') + Math.abs(f.b).toFixed(3) + ' (t in hours from window start)' + (f.excl ? ' · ' + f.excl + ' fault samples left out' : '') + (f.spk ? ' · ' + f.spk.toLocaleString() + ' glitch spikes left out' : '') + '</span>';
+          '<br><span style="font-size:13.5px;font-weight:700;color:var(--ink)">\u23f1 ' + fmtDate(f.w1) + ' \u2192 ' + fmtDate(f.w2) + ' (' + (hrs < 48 ? hrs.toFixed(1) + ' h' : (hrs / 24).toFixed(1) + ' d') + ')</span> <span class="n">\u00b7 y = ' + fmtSlope(f.a) + '·t ' + (f.b >= 0 ? '+ ' : '− ') + Math.abs(f.b).toFixed(3) + ' (t in hours from window start)' + (f.excl ? ' · ' + f.excl + ' fault samples left out' : '') + (f.spk ? ' · ' + f.spk.toLocaleString() + ' glitch spikes left out' : '') + '</span>';
         if (ln.snap){
           const kk = seriesIdxByName(rec.u, ln.nm);
           const v1 = valueNearX(rec.u, kk, ln.w1), v2 = valueNearX(rec.u, kk, ln.w2), hh = (ln.w2 - ln.w1) / 3600;
@@ -4852,7 +4888,7 @@ function makeChartNow(spec){
     measureRow.appendChild(measureBtn);
     drawLineBtn = document.createElement('button');
     drawLineBtn.textContent = 'draw line';
-    drawLineBtn.title = 'toggle on, then click the START and the END of the stretch you care about. Each click SNAPS to the nearest real data sample (the series it snapped to is named next to the cursor); the line drawn is the least-squares line through ALL samples of that series between the two clicks, so its slope is the slope of the data over the whole stretch. The list below shows the series, the two snapped samples, slope, R² and the straight start→end slope, and lets you switch to another series.';
+    drawLineBtn.title = 'toggle on, then DRAW a line along the data: press at the start, drag, release at the end (or click start, click end). You see your own stroke first, then it fits itself onto the data. The start SNAPS to the nearest real data sample (the series it snapped to is named next to the cursor); the line drawn is the least-squares line through ALL samples of that series between the two clicks, so its slope is the slope of the data over the whole stretch. The list below shows the series, the two snapped samples, slope, R² and the straight start→end slope, and lets you switch to another series.';
     measureRow.appendChild(drawLineBtn);
     wrap.appendChild(measureRow);
     measureReadout = document.createElement('div');
@@ -5209,77 +5245,106 @@ function makeChartNow(spec){
     // still exactly what's needed to render any lines restored from storage.
     requestAnimationFrame(() => { if (drawLineStore[spec.id] && drawLineStore[spec.id].length) refreshDrawLines(); });
 
-    let drawArmed = false, pendingPoint = null, downXY = null, previewRAF = null, lastMove = null;
+    let drawArmed = false, pendingPoint = null, drag = null, previewRAF = null, lastMove = null;
     const clearPreview = () => {
       if (previewRAF){ cancelAnimationFrame(previewRAF); previewRAF = null; }
       if (drawPreview[spec.id]){ delete drawPreview[spec.id]; u.redraw(); }
     };
     drawLineBtn.onclick = () => {
       drawArmed = !drawArmed;
-      pendingPoint = null; downXY = null;
+      pendingPoint = null; drag = null;
       clearPreview();
       drawLineBtn.textContent = drawArmed ? 'draw line: on' : 'draw line';
       drawLineBtn.classList.toggle('on', drawArmed);
       u.over.style.cursor = drawArmed ? 'crosshair' : '';
     };
-    u.over.addEventListener('mousedown', e => { if (drawArmed) downXY = { x: e.clientX, y: e.clientY }; });
-    // Snap preview: before the first click the sample that would be picked (and its series) is ringed under the cursor; after the
-    // first click a dashed line follows the cursor, snapped to the SAME series, with the live least-squares slope of the stretch.
-    // Throttled to one redraw per frame.
+    const dataAt = (cx, cy) => {
+      const rect = u.over.getBoundingClientRect(), { xMin, xMax } = resolveXRange(u, spec);
+      return { rect, x: xMin + ((cx - rect.left) / rect.width) * (xMax - xMin), y: u.posToVal(cy - rect.top, 'y') };
+    };
+    const commitLine = (s1, s2, raw) => {
+      const w1 = Math.min(s1.x, s2.x), w2 = Math.max(s1.x, s2.x);
+      if (w2 - w1 < 120) return false;                                   // both ends on the same sample
+      const id = drawLineIdSeq++;
+      (drawLineStore[spec.id] = drawLineStore[spec.id] || []).push({ id, no: nextLineNo(spec.id), fit: true, snap: true, nm: s1.nm, c: SERIES_COLORS[spec.id + '|' + s1.nm], u: trendUnit || '', w1, w2 });
+      if (raw) drawAnim[id] = { t0: performance.now(), x1: raw.x1, y1: raw.y1, x2: raw.x2, y2: raw.y2 };
+      saveDrawLineStore();
+      return true;
+    };
+    // draw mode takes the mouse over: uPlot's own drag-zoom / pan must not start while a line is being drawn
+    u.over.addEventListener('mousedown', e => {
+      if (!drawArmed || e.button !== 0) return;
+      e.stopImmediatePropagation(); e.preventDefault();
+      const rect = u.over.getBoundingClientRect();
+      if (rect.width <= 0) return;
+      drag = { down: { x: e.clientX, y: e.clientY }, moved: false, s1: snapToData(u, spec, e.clientX - rect.left, e.clientY - rect.top) };
+    }, true);
+    // hover (before anything is pressed) and click-click rubber band
     u.over.addEventListener('mousemove', e => {
-      if (!drawArmed) return;
+      if (!drawArmed || drag) return;
       lastMove = { cx: e.clientX, cy: e.clientY };
       if (previewRAF) return;
       previewRAF = requestAnimationFrame(() => {
         previewRAF = null;
-        if (!drawArmed || !lastMove) return;
+        if (!drawArmed || !lastMove || drag) return;
         const rect = u.over.getBoundingClientRect();
         if (rect.width <= 0) return;
         if (!pendingPoint){
           const sn = snapToData(u, spec, lastMove.cx - rect.left, lastMove.cy - rect.top);
           if (sn) drawPreview[spec.id] = { s1: sn, hover: true }; else delete drawPreview[spec.id];
         } else {
-          const { xMin, xMax } = resolveXRange(u, spec);
-          const xVal = xMin + ((lastMove.cx - rect.left) / rect.width) * (xMax - xMin);
-          const s2 = snapSameSeries(u, spec, pendingPoint.k, xVal);
+          const s2 = snapSameSeries(u, spec, pendingPoint.k, dataAt(lastMove.cx, lastMove.cy).x);
           drawPreview[spec.id] = { s1: pendingPoint, s2: s2 || undefined };
         }
         u.redraw();
       });
     });
-    u.over.addEventListener('mouseleave', () => { if (!pendingPoint) clearPreview(); });
-    u.over.addEventListener('mouseup', e => {
-      if (!drawArmed || !downXY) return;
-      const moved = Math.hypot(e.clientX - downXY.x, e.clientY - downXY.y);
-      downXY = null;
-      if (moved > 4) return; // a drag (pan/zoom-select), not a point placement — leave it to uPlot's own cursor handling
+    u.over.addEventListener('mouseleave', () => { if (!pendingPoint && !drag) clearPreview(); });
+    // dragging: your own stroke follows the mouse (no shading)
+    window.addEventListener('mousemove', e => {
+      if (!drag || !drawArmed) return;
+      if (!drag.moved && Math.hypot(e.clientX - drag.down.x, e.clientY - drag.down.y) > 4) drag.moved = true;
+      if (!drag.moved || !drag.s1) return;
+      lastMove = { cx: e.clientX, cy: e.clientY };
+      if (previewRAF) return;
+      previewRAF = requestAnimationFrame(() => {
+        previewRAF = null;
+        if (!drag || !drag.moved || !lastMove) return;
+        const d = dataAt(lastMove.cx, lastMove.cy);
+        drawPreview[spec.id] = { drag: true, s1: drag.s1, cur: { x: d.x, y: d.y }, s2: snapSameSeries(u, spec, drag.s1.k, d.x) || undefined };
+        u.redraw();
+      });
+    });
+    window.addEventListener('mouseup', e => {
+      if (!drag || !drawArmed){ drag = null; return; }
+      const d = drag; drag = null;
+      if (d.moved){                                                        // a drawn stroke: keep it visible, then fit it
+        if (!d.s1){ clearPreview(); return; }
+        const cur = dataAt(e.clientX, e.clientY), s2 = snapSameSeries(u, spec, d.s1.k, cur.x);
+        pendingPoint = null;
+        let raw = { x1: d.s1.x, y1: d.s1.y, x2: cur.x, y2: cur.y };
+        if (raw.x2 < raw.x1) raw = { x1: raw.x2, y1: raw.y2, x2: raw.x1, y2: raw.y1 };
+        clearPreview();
+        if (s2 && commitLine(d.s1, s2, raw)) refreshDrawLines();
+        return;
+      }
+      // a plain click: first click = start, next click = end (and the end starts the next line)
       const rect = u.over.getBoundingClientRect();
       if (rect.width <= 0) return;
       if (!pendingPoint){
-        const sn = snapToData(u, spec, e.clientX - rect.left, e.clientY - rect.top);
-        if (!sn) return;                       // nothing close enough to snap to
-        pendingPoint = sn;
-        drawPreview[spec.id] = { s1: sn };
-        u.redraw();
+        const sn = snapToData(u, spec, d.down.x - rect.left, d.down.y - rect.top);
+        if (!sn) return;
+        pendingPoint = sn; drawPreview[spec.id] = { s1: sn }; u.redraw();
         return;
       }
-      // same x-range caveat as resolveXRange(): go through the resolved range, not u.posToVal(pos,'x')
-      const { xMin, xMax } = resolveXRange(u, spec);
-      const xVal = xMin + ((e.clientX - rect.left) / rect.width) * (xMax - xMin);
-      const s2 = snapSameSeries(u, spec, pendingPoint.k, xVal);
-      const s1 = pendingPoint;
-      if (!s2) return;
-      const w1 = Math.min(s1.x, s2.x), w2 = Math.max(s1.x, s2.x);
-      if (w2 - w1 < 120) return;               // both clicks on the same sample: wait for a different END point
-      (drawLineStore[spec.id] = drawLineStore[spec.id] || []).push({ id: drawLineIdSeq++, no: nextLineNo(spec.id), fit: true, snap: true, nm: s1.nm, c: SERIES_COLORS[spec.id + '|' + s1.nm], u: trendUnit || '', w1, w2 });
-      saveDrawLineStore();
-      // chain: the end of this stretch is the start of the next one (right-click or Esc to stop)
+      const s1 = pendingPoint, s2 = snapSameSeries(u, spec, s1.k, dataAt(d.down.x, d.down.y).x);
+      if (!s2 || !commitLine(s1, s2, null)) return;
       pendingPoint = (s2.x >= s1.x) ? s2 : s1;
       drawPreview[spec.id] = { s1: pendingPoint };
       refreshDrawLines();
     });
-    u.over.addEventListener('contextmenu', e => { if (drawArmed){ e.preventDefault(); pendingPoint = null; clearPreview(); } });
-    window.addEventListener('keydown', e => { if (e.key === 'Escape' && pendingPoint){ pendingPoint = null; clearPreview(); } });
+    u.over.addEventListener('contextmenu', e => { if (drawArmed){ e.preventDefault(); pendingPoint = null; drag = null; clearPreview(); } });
+    window.addEventListener('keydown', e => { if (e.key === 'Escape' && (pendingPoint || drag)){ pendingPoint = null; drag = null; clearPreview(); } });
   }
 
   const legendLabelEls = [];
