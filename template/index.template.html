@@ -3367,6 +3367,7 @@ function loadDrawLineStore(){
 function saveDrawLineStore(){ try { localStorage.setItem(DRAWLINE_STORE_KEY, JSON.stringify(drawLineStore)); } catch(e){ /* private mode — lines still apply this session */ } }
 let drawLineStore = loadDrawLineStore(); // { [chartId]: [ {id, x1, y1, x2, y2}, ... ] }
 let drawLineIdSeq = 1;
+function nextLineNo(chartId){ const a = drawLineStore[chartId] || []; return a.reduce((m, l) => Math.max(m, l.no || 0), a.length) + 1; }
 // Live rubber-band preview: after the first click is placed, this holds a
 // {x1,y1,x2,y2} from that point to the current cursor position while the
 // user aims for the second click — pure visual/K-estimate feedback, never
@@ -3374,6 +3375,8 @@ let drawLineIdSeq = 1;
 // gesture). Per user feedback: the committed line's slope was correct, but
 // there was nothing to gauge against while moving toward the second point.
 const drawPreview = {}; // { [chartId]: {x1,y1,x2,y2} | undefined }
+const drawAnim = {};    // { [lineId]: {t0,x1,y1,x2,y2} } the hand stroke that morphs into the fitted line
+const tagHits = {};     // { [chartId]: [ {id,cx,cy,w,h,ax,ay} ] } tag boxes in CSS px relative to the plot area (drag + double-click)
 Object.keys(drawLineStore).forEach(k => (drawLineStore[k] || []).forEach(ln => {
   if (typeof ln.id === 'number' && ln.id >= drawLineIdSeq) drawLineIdSeq = ln.id + 1;
 }));
@@ -3456,6 +3459,66 @@ function pickFitSeries(u, spec, p1, p2){
   });
   return best;
 }
+// ---- "draw line": every click SNAPS to a real data sample ------------------------------------------------------
+// snapToData(): the nearest sample (in pixels) of any visible series around the cursor; snapSameSeries(): for the END click the
+// sample of the SAME series that is closest in time to the cursor. A sample is skipped when it is empty or fault-flagged
+// (when the fault filter is on), exactly as the least-squares fit skips it.
+function snapOk(u, spec, k, i){
+  const y = u.data[k][i];
+  if (y == null || y !== y) return false;
+  const nm = u.series[k].label;
+  const fault = (thresholds.faultFilterEnabled && spec.primary.chOwner.FAULT) ? spec.primary.chOwner.FAULT[nm] : null;
+  return !(fault && fault[i]);
+}
+function snapToData(u, spec, localX, localY){
+  const rect = u.over.getBoundingClientRect();
+  if (rect.width <= 0) return null;
+  const { xMin, xMax } = resolveXRange(u, spec);
+  if (!(xMax > xMin)) return null;
+  const xs = u.data[0];
+  const xAt = px => xMin + (px / rect.width) * (xMax - xMin);
+  const pxOf = x => ((x - xMin) / (xMax - xMin)) * rect.width;
+  const R = 16;
+  const i0 = Math.max(0, lowerBound(xs, xAt(localX - R), 0, xs.length) - 1);
+  const i1 = Math.min(xs.length - 1, lowerBound(xs, xAt(localX + R), 0, xs.length));
+  const stride = Math.max(1, Math.floor((i1 - i0 + 1) / 500));
+  let best = null;
+  spec.primary.names.forEach((nm, idx) => {
+    const k = idx + 1, s = u.series[k];
+    if (!s || s.show === false) return;
+    const dist = i => Math.hypot(pxOf(xs[i]) - localX, u.valToPos(u.data[k][i], 'y') - localY);
+    let bi = -1, bd = Infinity;
+    for (let i = i0; i <= i1; i += stride){
+      if (!snapOk(u, spec, k, i)) continue;
+      const d = dist(i); if (d < bd){ bd = d; bi = i; }
+    }
+    if (bi < 0) return;
+    if (stride > 1){                       // refine around the coarse winner
+      for (let i = Math.max(i0, bi - stride); i <= Math.min(i1, bi + stride); i++){
+        if (!snapOk(u, spec, k, i)) continue;
+        const d = dist(i); if (d < bd){ bd = d; bi = i; }
+      }
+    }
+    if (!best || bd < best.d) best = { k, nm, i: bi, x: xs[bi], y: u.data[k][bi], d: bd };
+  });
+  return (best && best.d <= 70) ? best : null;
+}
+function snapSameSeries(u, spec, k, xVal){
+  const xs = u.data[0];
+  const j = lowerBound(xs, xVal, 0, xs.length);
+  let best = null;
+  for (let d = 0; d <= 400; d++){
+    for (const i of [j - d, j + d]){
+      if (i < 0 || i >= xs.length || !snapOk(u, spec, k, i)) continue;
+      const dt = Math.abs(xs[i] - xVal);
+      if (!best || dt < best.dt) best = { k, nm: u.series[k].label, i, x: xs[i], y: u.data[k][i], dt };
+    }
+    if (best && d > 0) break;
+  }
+  return best;
+}
+function fmtSnapVal(v, un){ return (Math.abs(v) >= 100 ? v.toFixed(1) : v.toFixed(3)) + (un || ''); }
+
 function fitText(f, un){
   const sg = v => fmtSlope(v);
   return sg(f.a) + ' ' + un + '/h';
@@ -3488,6 +3551,100 @@ function drawFitTags(ctx, tags, dpr, left, top, width, height){
   ctx.restore();
 }
 
+// tags like the slides: a white box with a coloured border and coloured bold text ('#26 -0.0054').
+// Each tag starts in the MIDDLE of its line. When tags would cover each other they are moved apart automatically (up / down / sideways, trying the
+// closest free spot first, and never letting an arrow run across another tag); a thin arrow then joins the tag to its line.
+// A tag can also be dragged by hand: its offset from the line is remembered, the other tags make room, double-click = automatic again.
+function drawSlideTags(ctx, tags, dpr, left, top, width, height, chartId){
+  if (chartId) tagHits[chartId] = [];
+  if (!tags.length) return;
+  ctx.save();
+  ctx.font = 'bold ' + (10.5 * dpr) + 'px "IBM Plex Mono", monospace';
+  ctx.textBaseline = 'middle'; ctx.textAlign = 'center'; ctx.setLineDash([]);
+  const h = 16 * dpr, pad = 3 * dpr, edge = 2 * dpr;
+  const x0 = left + edge, x1 = left + width - edge, y0 = top + edge, y1 = top + height - edge;
+  const rectAt = (cx, cy, w) => ({ x0: cx - w / 2, y0: cy - h / 2, x1: cx + w / 2, y1: cy + h / 2 });
+  const rectHit = (p, q, g) => p.x0 < q.x1 + g && p.x1 > q.x0 - g && p.y0 < q.y1 + g && p.y1 > q.y0 - g;
+  const segHit = (ax, ay, bx, by, r) => {                                  // Liang-Barsky: does the segment touch the rectangle?
+    let t0 = 0, t1 = 1; const dx = bx - ax, dy = by - ay, p = [-dx, dx, -dy, dy], q = [ax - r.x0, r.x1 - ax, ay - r.y0, r.y1 - ay];
+    for (let i = 0; i < 4; i++){
+      if (p[i] === 0){ if (q[i] < 0) return false; continue; }
+      const t = q[i] / p[i];
+      if (p[i] < 0){ if (t > t1) return false; if (t > t0) t0 = t; } else { if (t < t0) return false; if (t < t1) t1 = t; }
+    }
+    return true;
+  };
+  // arrow from the tag to the closest point of its own line (null when the tag still sits on its line)
+  const leaderOf = (t, cx, cy, w) => {
+    const [sx1, sy1, sx2, sy2] = t.seg || [t.ax, t.ay, t.ax, t.ay];
+    const vx = sx2 - sx1, vy = sy2 - sy1, L2 = vx * vx + vy * vy;
+    let u = L2 > 0 ? ((cx - sx1) * vx + (cy - sy1) * vy) / L2 : 0.5;
+    u = Math.min(0.96, Math.max(0.04, u));
+    const tx = sx1 + u * vx, ty = sy1 + u * vy;
+    if (Math.abs(tx - cx) <= w / 2 + edge && Math.abs(ty - cy) <= h / 2 + edge) return null;
+    const dx = tx - cx, dy = ty - cy, L = Math.hypot(dx, dy) || 1, ux = dx / L, uy = dy / L;
+    const sc = Math.min(Math.abs(ux) > 1e-6 ? (w / 2) / Math.abs(ux) : 1e9, Math.abs(uy) > 1e-6 ? (h / 2) / Math.abs(uy) : 1e9);
+    const bx = cx + ux * sc, by = cy + uy * sc;
+    if (Math.hypot(tx - bx, ty - by) < 3 * dpr) return null;
+    return { bx, by, tx, ty, ux, uy };
+  };
+  tags.forEach(t => {
+    t.w = ctx.measureText(t.text).width + 10 * dpr;
+    t.ax = t.x; t.ay = t.y;                                             // anchor = middle of the line
+    t.pinned = (t.tdx != null && t.tdy != null);                        // placed by hand
+  });
+  const clampC = (t, cx, cy) => [Math.min(Math.max(cx, x0 + t.w / 2), x1 - t.w / 2), Math.min(Math.max(cy, y0 + h / 2), y1 - h / 2)];
+  const placed = [];                                                    // { r: box, ld: leader }
+  tags.filter(t => t.pinned).forEach(t => {
+    [t.x, t.y] = clampC(t, t.ax + t.tdx * dpr, t.ay + t.tdy * dpr);
+    t.ld = leaderOf(t, t.x, t.y, t.w); placed.push({ r: rectAt(t.x, t.y, t.w), ld: t.ld });
+  });
+  // the rest: closest free spot first (own line centre, then above/below, then sideways), never over another tag or across another arrow
+  const step = h + pad;
+  const dyList = [0]; for (let k = 1; k <= 14; k++){ dyList.push(-k * step, k * step); }
+  const auto = tags.filter(t => !t.pinned).sort((p, q) => p.ax - q.ax || p.ay - q.ay);
+  auto.forEach(t => {
+    const cands = [];
+    [0, 0.5, -0.5, 1, -1, 1.5, -1.5, 2, -2].forEach(kx => dyList.forEach(dy => cands.push({ dx: kx * t.w, dy, cost: Math.hypot(kx * t.w * 0.85, dy) })));
+    cands.sort((p, q) => p.cost - q.cost);
+    let best = null, fallback = null;
+    for (const c of cands){
+      const cx = t.ax + c.dx, cy = t.ay + c.dy;
+      if (cx - t.w / 2 < x0 || cx + t.w / 2 > x1 || cy - h / 2 < y0 || cy + h / 2 > y1) continue;
+      const r = rectAt(cx, cy, t.w);
+      if (placed.some(p => rectHit(r, p.r, pad))) continue;
+      if (!fallback) fallback = { cx, cy, r, ld: leaderOf(t, cx, cy, t.w) };
+      const ld = leaderOf(t, cx, cy, t.w);
+      if (ld && placed.some(p => segHit(ld.bx, ld.by, ld.tx, ld.ty, p.r))) continue;     // this arrow would cross another tag
+      if (placed.some(p => p.ld && segHit(p.ld.bx, p.ld.by, p.ld.tx, p.ld.ty, r))) continue; // another arrow would cross this tag
+      best = { cx, cy, r, ld }; break;
+    }
+    if (!best) best = fallback || (() => { const [cx, cy] = clampC(t, t.ax, t.ay); return { cx, cy, r: rectAt(cx, cy, t.w), ld: leaderOf(t, cx, cy, t.w) }; })();
+    t.x = best.cx; t.y = best.cy; t.ld = best.ld; placed.push({ r: best.r, ld: best.ld });
+  });
+  // boxes, then the arrows on top (white halo) so an arrow is always visible
+  tags.forEach(t => {
+    const bx0 = t.x - t.w / 2, by0 = t.y - h / 2;
+    ctx.globalAlpha = 0.94; ctx.fillStyle = COLOR_PANEL; ctx.beginPath(); ctx.rect(bx0, by0, t.w, h); ctx.fill(); ctx.globalAlpha = 1;
+    ctx.strokeStyle = t.col; ctx.lineWidth = (t.pinned ? 2.2 : 1.6) * dpr; ctx.stroke();
+    ctx.fillStyle = t.col; ctx.fillText(t.text, t.x, t.y + 0.5 * dpr);
+    if (chartId && t.id != null) tagHits[chartId].push({ id: t.id, cx: (t.x - left) / dpr, cy: (t.y - top) / dpr, w: t.w / dpr, h: h / dpr, ax: (t.ax - left) / dpr, ay: (t.ay - top) / dpr });
+  });
+  tags.forEach(t => {
+    const d = t.ld; if (!d) return;
+    const ah = 8 * dpr, hx1 = d.tx - d.ux * ah - d.uy * ah * 0.5, hy1 = d.ty - d.uy * ah + d.ux * ah * 0.5, hx2 = d.tx - d.ux * ah + d.uy * ah * 0.5, hy2 = d.ty - d.uy * ah - d.ux * ah * 0.5;
+    ctx.lineJoin = 'round';
+    ctx.strokeStyle = COLOR_PANEL; ctx.lineWidth = 4.2 * dpr;               // white halo
+    ctx.beginPath(); ctx.moveTo(d.bx, d.by); ctx.lineTo(d.tx, d.ty); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(d.tx, d.ty); ctx.lineTo(hx1, hy1); ctx.lineTo(hx2, hy2); ctx.closePath(); ctx.stroke();
+    ctx.strokeStyle = t.col; ctx.fillStyle = t.col; ctx.lineWidth = 1.8 * dpr;
+    ctx.beginPath(); ctx.moveTo(d.bx, d.by); ctx.lineTo(d.tx, d.ty); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(d.tx, d.ty); ctx.lineTo(hx1, hy1); ctx.lineTo(hx2, hy2); ctx.closePath(); ctx.fill();
+    ctx.beginPath(); ctx.arc(d.tx, d.ty, 2.6 * dpr, 0, 2 * Math.PI); ctx.fill();
+  });
+  ctx.restore();
+}
+
 function drawUserLinesHook(spec){
   return u => {
     const lines = drawLineStore[spec.id];
@@ -3504,20 +3661,26 @@ function drawUserLinesHook(spec){
     ctx.beginPath(); ctx.rect(left, top, width, height); ctx.clip();
     ctx.font = (11 * dpr) + 'px "IBM Plex Mono", monospace';
     ctx.textBaseline = 'bottom';
-    const tags = [];
-    let fitNo = 0;
+    const tags = [], slideTags = [];
+    let fitNo = 0, animActive = false;
     (lines || []).forEach(ln => {
-      let x1 = ln.x1, y1 = ln.y1, x2 = ln.x2, y2 = ln.y2, label, col = ln.c || COLOR_DRAWLINE;
+      if (ln.hide) return;
+      let x1 = ln.x1, y1 = ln.y1, x2 = ln.x2, y2 = ln.y2, label, col = ln.c || COLOR_DRAWLINE, fitCache = null;
       if (ln.fit){
         const k = seriesIdxByName(u, ln.nm);
         if (k < 1 || u.series[k].show === false) return;
         const f = fitSeriesWindow(u, spec, ln.nm, ln.w1, ln.w2);
         if (!f) return;
+        fitCache = f;
         x1 = f.xFirst; x2 = f.xLast; y1 = f.a * (x1 - f.t0) / 3600 + f.b; y2 = f.a * (x2 - f.t0) / 3600 + f.b;
-        // the chosen stretch, lightly shaded
-        const bx1 = xToPx(f.w1), bx2 = xToPx(f.w2);
-        ctx.save(); ctx.globalAlpha = 0.07; ctx.fillStyle = col; ctx.fillRect(Math.min(bx1, bx2), top, Math.abs(bx2 - bx1), height); ctx.restore();
-        fitNo++; label = 'F' + fitNo;
+        // only the slope line is drawn: no shading behind it
+        label = '#' + (ln.no || ++fitNo);
+        { const an = drawAnim[ln.id];      // right after drawing: start from the user's own stroke and slide onto the fitted line
+          if (an){
+            const p = Math.min(1, (performance.now() - an.t0) / 750);
+            if (p >= 1) delete drawAnim[ln.id];
+            else { animActive = true; const e = p * p * (3 - 2 * p); x1 = an.x1 + (x1 - an.x1) * e; y1 = an.y1 + (y1 - an.y1) * e; x2 = an.x2 + (x2 - an.x2) * e; y2 = an.y2 + (y2 - an.y2) * e; }
+          } }
       } else {
         const { K } = lineStats(x1, y1, x2, y2);
         label = 'K ≈ ' + (K >= 0 ? '+' : '') + K.toFixed(4) + (ln.u || '°') + '/hr';
@@ -3526,53 +3689,160 @@ function drawUserLinesHook(spec){
       const px2 = xToPx(x2), py2 = u.valToPos(y2, 'y', true);
       if ([px1, py1, px2, py2].some(v => v == null || isNaN(v) || !isFinite(v))) return;
       if (ln.fit){ ctx.lineWidth = 5 * dpr; ctx.strokeStyle = COLOR_PANEL; ctx.globalAlpha = 0.75; ctx.beginPath(); ctx.moveTo(px1, py1); ctx.lineTo(px2, py2); ctx.stroke(); ctx.globalAlpha = 1; }
-      ctx.lineWidth = 2.4 * dpr;
-      ctx.strokeStyle = col;
-      ctx.setLineDash(ln.fit ? [] : []);
+      ctx.lineWidth = (ln.fit ? 3 : 2.4) * dpr;
+      ctx.strokeStyle = ln.fit ? COLOR_INK : col;            // slides: a dark dashed slope line over the data
+      ctx.setLineDash(ln.fit ? [9 * dpr, 5 * dpr] : []);
       ctx.beginPath(); ctx.moveTo(px1, py1); ctx.lineTo(px2, py2); ctx.stroke();
-      [[px1, py1], [px2, py2]].forEach(([px, py]) => {
+      ctx.setLineDash([]);
+      if (!ln.fit) [[px1, py1], [px2, py2]].forEach(([px, py]) => {
         ctx.beginPath(); ctx.arc(px, py, 3 * dpr, 0, 2 * Math.PI);
         ctx.fillStyle = col; ctx.fill();
       });
       if (ln.fit){
-        const f2 = fitSeriesWindow(u, spec, ln.nm, ln.w1, ln.w2), un2 = trendUnitFor(spec);
-        let tcol = col, ttxt = label;
+        const f2 = fitCache, un2 = trendUnitFor(spec);
+        let tcol = col, ttxt = label + ' ' + ln.nm;
         if (f2 && isFinite(f2.a)){
-          ttxt = label + ' ' + fmtSlope(f2.a) + (un2 || '') + '/h';
-          ttxt += ' · ' + fmtShort(f2.xFirst) + '→' + fmtShort(f2.xLast);
+          { const dv = f2.a * 24, av = Math.abs(dv); ttxt = ttxt + ' ' + (dv < 0 ? '\u2212' : '+') + av.toFixed(av >= 0.01 ? 3 : 4) + ' \u00b0/day'; }    // as on the slides: '#26 \u22120.0054' (degree/day); series and dates are in the list below the chart
           if (un2 === '\u00b0'){ const sc = deckSpeedClass(Math.abs(f2.a)); tcol = sc.c; ttxt += ' ' + sc.k; }
         }
-        tags.push({ text: ttxt, x: px2, y: py2, col: tcol });
+        slideTags.push({ id: ln.id, text: ttxt, x: (px1 + px2) / 2, y: (py1 + py2) / 2, col: tcol, seg: [px1, py1, px2, py2], tdx: ln.tdx, tdy: ln.tdy });
       }
     });
-    drawFitTags(ctx, tags, dpr, left, top, width, height);
-    // aiming: the stretch between the first click and the cursor, plus which series it would fit
+    drawSlideTags(ctx, slideTags, dpr, left, top, width, height, spec.id);
+    if (animActive) requestAnimationFrame(() => u.redraw());
+    // aiming (draw line): the snapped sample under the cursor, then the stretch to the second snapped sample
     if (preview){
-      const bx1 = xToPx(preview.x1), bx2 = xToPx(preview.x2);
+      const un = trendUnitFor(spec) || '';
+      const col = COLOR_DRAWLINE;
       ctx.save();
-      ctx.globalAlpha = 0.10; ctx.fillStyle = COLOR_DRAWLINE; ctx.fillRect(Math.min(bx1, bx2), top, Math.abs(bx2 - bx1), height);
-      ctx.globalAlpha = 0.8; ctx.strokeStyle = COLOR_DRAWLINE; ctx.lineWidth = 1.5 * dpr; ctx.setLineDash([5 * dpr, 4 * dpr]);
-      [bx1, bx2].forEach(bx => { ctx.beginPath(); ctx.moveTo(bx, top); ctx.lineTo(bx, top + height); ctx.stroke(); });
-      ctx.setLineDash([]); ctx.globalAlpha = 1; ctx.fillStyle = COLOR_DRAWLINE; ctx.textBaseline = 'top';
-      const hrs = Math.abs(preview.x2 - preview.x1) / 3600;
-      ctx.fillText((preview.nm ? 'fits ' + preview.nm : 'no series near these points') + '  ·  ' + (hrs < 48 ? hrs.toFixed(1) + ' h' : (hrs / 24).toFixed(1) + ' d'), Math.min(bx1, bx2) + 4 * dpr, top + 4 * dpr);
+      ctx.setLineDash([]);
+      const ring = (pt, filled) => {
+        const px = xToPx(pt.x), py = u.valToPos(pt.y, 'y', true);
+        ctx.beginPath(); ctx.arc(px, py, (filled ? 4 : 7) * dpr, 0, 2 * Math.PI);
+        if (filled){ ctx.fillStyle = col; ctx.fill(); }
+        ctx.lineWidth = 2 * dpr; ctx.strokeStyle = col; ctx.stroke();
+        return [px, py];
+      };
+      const pill = (txt, x, y) => {
+        ctx.font = (11 * dpr) + 'px "IBM Plex Mono", monospace'; ctx.textBaseline = 'top'; ctx.textAlign = 'left';
+        const w = ctx.measureText(txt).width + 10 * dpr, h = 17 * dpr;
+        const px = Math.min(Math.max(x, left + 2 * dpr), left + width - w - 2 * dpr), py = Math.min(Math.max(y, top + 2 * dpr), top + height - h - 2 * dpr);
+        ctx.globalAlpha = 0.92; ctx.fillStyle = COLOR_PANEL; ctx.fillRect(px, py, w, h);
+        ctx.globalAlpha = 1; ctx.strokeStyle = col; ctx.lineWidth = 1 * dpr; ctx.strokeRect(px, py, w, h);
+        ctx.fillStyle = col; ctx.fillText(txt, px + 5 * dpr, py + 3 * dpr);
+      };
+      if (preview.drag && preview.cur){
+        const [ax, ay] = ring(preview.s1, true);
+        const cx = xToPx(preview.cur.x), cy = u.valToPos(preview.cur.y, 'y', true);
+        ctx.setLineDash([]); ctx.lineWidth = 2.8 * dpr; ctx.strokeStyle = col; ctx.lineCap = 'round';
+        ctx.beginPath(); ctx.moveTo(ax, ay); ctx.lineTo(cx, cy); ctx.stroke();
+        ctx.beginPath(); ctx.arc(cx, cy, 3.5 * dpr, 0, 2 * Math.PI); ctx.fillStyle = col; ctx.fill();
+        let txt = 'drawing on ' + preview.s1.nm;
+        if (preview.s2 && Math.abs(preview.s2.x - preview.s1.x) >= 120){
+          const f = fitSeriesWindow(u, spec, preview.s1.nm, Math.min(preview.s1.x, preview.s2.x), Math.max(preview.s1.x, preview.s2.x));
+          if (f) txt += ' \u00b7 slope ' + (f.a < 0 ? '\u2212' : '+') + Math.abs(f.a * 24).toFixed(Math.abs(f.a * 24) >= 0.01 ? 3 : 4) + ' ' + un + '/day';
+        }
+        pill(txt + '  (release: the line fits itself to the data)', Math.min(ax, cx) + 6 * dpr, top + 6 * dpr);
+      } else if (preview.s1 && !preview.s2){
+        const [px, py] = ring(preview.s1, false);
+        pill('snap \u2192 ' + preview.s1.nm + ' \u00b7 ' + fmtShort(preview.s1.x) + ' \u00b7 ' + fmtSnapVal(preview.s1.y, un) + (preview.hover ? '  (click to set START)' : '  (click to set END \u00b7 right-click = new start)'), px + 12 * dpr, py - 26 * dpr);
+      } else if (preview.s1 && preview.s2){
+        const bx1 = xToPx(preview.s1.x), bx2 = xToPx(preview.s2.x);
+        const [ax, ay] = ring(preview.s1, true), [bx, by] = ring(preview.s2, false);
+        ctx.setLineDash([5 * dpr, 4 * dpr]); ctx.lineWidth = 1.5 * dpr; ctx.strokeStyle = col;
+        ctx.beginPath(); ctx.moveTo(ax, ay); ctx.lineTo(bx, by); ctx.stroke(); ctx.setLineDash([]);
+        const hrs = Math.abs(preview.s2.x - preview.s1.x) / 3600;
+        const w1 = Math.min(preview.s1.x, preview.s2.x), w2 = Math.max(preview.s1.x, preview.s2.x);
+        const f = (w2 - w1 >= 120) ? fitSeriesWindow(u, spec, preview.s1.nm, w1, w2) : null;
+        pill('snap \u2192 ' + preview.s1.nm + ' \u00b7 ' + (hrs < 48 ? hrs.toFixed(1) + ' h' : (hrs / 24).toFixed(1) + ' d') +
+          (f ? ' \u00b7 slope ' + fmtSlope(f.a) + un + '/h (least squares, n ' + f.n.toLocaleString() + ')' : '') + '  (click = end this stretch & start the next \u00b7 right-click = stop)', Math.min(bx1, bx2) + 6 * dpr, top + 6 * dpr);
+      }
       ctx.restore();
     }
     ctx.restore();
   };
 }
 
+function bkkInputStr(t){ const d = new Date((t + 7 * 3600) * 1000), p = n => String(n).padStart(2, '0'); return d.getUTCFullYear() + '-' + p(d.getUTCMonth() + 1) + '-' + p(d.getUTCDate()) + 'T' + p(d.getUTCHours()) + ':' + p(d.getUTCMinutes()); }
+function bkkInputToEpoch(str){ const m = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})$/.exec(str || ''); return m ? Date.UTC(+m[1], +m[2] - 1, +m[3], +m[4], +m[5]) / 1000 - 7 * 3600 : NaN; }
 function renderDrawLineList(chartId, listEl, onChange){
   const lines = drawLineStore[chartId] || [];
   if (!lines.length){ listEl.innerHTML = ''; listEl.style.display = 'none'; return; }
   listEl.className = 'note measure-readout drawline-list';
   listEl.style.display = '';
   listEl.innerHTML = '';
+  { const lg = document.createElement('div'); lg.className = 'n'; lg.style.cssText = 'margin-bottom:5px';
+    const sw = (v, txt) => '<b style="color:' + deckSpeedClass(v).c + '">■ ' + txt + '</b>';
+    lg.innerHTML = 'tags sit on the middle of their line, move apart by themselves when they overlap (an arrow then points to the line) · drag a tag to place it yourself · double-click a tag = automatic position again<br>tag = #n and slope in degree/day · tag colour = speed class (degree/hour): ' + sw(0.001, 'very slow &lt;0.004') + ' ' + sw(0.01, 'slow 0.004–0.04') + ' ' + sw(0.1, 'moderate 0.04–0.4') + ' ' + sw(1, 'rapid &gt;0.4');
+    listEl.appendChild(lg); }
   const rec = charts.find(c => c.id === chartId), spec = chartSpecs.find(s => s.id === chartId);
   const sign = v => (v >= 0 ? '+' : '');
+  { let mx = lines.reduce((m, l) => Math.max(m, l.no || 0), 0), changed = false;
+    lines.forEach(l => { if (!l.no){ l.no = ++mx; changed = true; } });
+    if (changed) saveDrawLineStore(); }
+  // ---- Excel-style tick list: ONE TICK PER LINE (tick = shown on the chart, untick = hidden but kept). Rows are grouped by sensor:
+  //      each group is headed by the sensor name, each row repeats the sensor and gives the date range of the line and its slope.
+  { const apply = fn => { fn(); saveDrawLineStore(); onChange(); };
+    const box = document.createElement('div'); box.style.cssText = 'margin:4px 0 6px';
+    const bar = document.createElement('div'); bar.style.cssText = 'display:flex;flex-wrap:wrap;gap:4px 10px;align-items:center;margin-bottom:4px';
+    const mk = (txt, fn) => { const b = document.createElement('button'); b.type = 'button'; b.textContent = txt; b.style.cssText = 'font:11px "IBM Plex Mono",monospace;padding:1px 8px'; b.onclick = () => apply(fn); return b; };
+    bar.appendChild(mk('show all', () => lines.forEach(l => { delete l.hide; })));
+    bar.appendChild(mk('hide all', () => lines.forEach(l => { l.hide = true; })));
+    bar.appendChild(mk('reset tag positions', () => lines.forEach(l => { delete l.tdx; delete l.tdy; })));
+    { const t = document.createElement('span'); t.className = 'n'; t.textContent = 'tick a line to show it on the chart · lines are grouped by sensor'; bar.appendChild(t); }
+    box.appendChild(bar);
+    const wrapT = document.createElement('div'); wrapT.style.cssText = 'max-height:300px;overflow:auto;border:1px solid var(--line);border-radius:4px;background:var(--panel)';
+    const tb = document.createElement('table'); tb.style.cssText = 'border-collapse:collapse;width:100%;font:12px "IBM Plex Mono",monospace';
+    tb.innerHTML = '<thead><tr style="position:sticky;top:0;background:var(--panel-2);z-index:1"><th></th><th>#</th><th style="text-align:left">sensor</th><th>from</th><th>to</th><th>slope /day</th><th>R²</th></tr></thead>';
+    const tbody = document.createElement('tbody');
+    const dd = t => new Date(t * 1e3).toLocaleDateString('en-GB', { timeZone: 'Asia/Bangkok', day: '2-digit', month: 'short', year: 'numeric' });
+    const tk = c => { const m = /^tilt_(\d+)(?:_(\w+))?$/.exec(c || ''); return m ? [+m[1], m[2] || ''] : [999, c || '']; };
+    const groups = {}; lines.forEach(l => { const g = l.fit ? l.nm : 'hand-drawn'; (groups[g] = groups[g] || []).push(l); });
+    Object.keys(groups).sort((p, q) => { const x = tk(p), y = tk(q); return (x[0] - y[0]) || (x[1] < y[1] ? -1 : x[1] > y[1] ? 1 : 0); }).forEach(g => {
+      const mine = groups[g].slice().sort((p, q) => (p.w1 || 0) - (q.w1 || 0) || p.no - q.no);
+      const on = mine.filter(l => !l.hide).length;
+      const gh = document.createElement('tr'); gh.style.cssText = 'background:var(--panel-2);border-top:1px solid var(--line)';
+      const col = SERIES_COLORS[chartId + '|' + g] || COLOR_DRAWLINE;
+      gh.innerHTML = '<td colspan="7" style="padding:2px 6px;font-weight:700;text-align:left"><span style="color:' + col + '">■</span> ' + escapeHtml(g) +
+        ' <span style="font-weight:400;opacity:.7">· ' + mine.length + (mine.length === 1 ? ' line' : ' lines') + ' · ' + on + ' shown</span></td>';
+      tbody.appendChild(gh);
+      mine.forEach(l => {
+        const tr = document.createElement('tr'); tr.style.cssText = 'border-top:1px solid var(--line);' + (l.hide ? 'opacity:.45' : '');
+        const f = (l.fit && rec && spec) ? fitSeriesWindow(rec.u, spec, l.nm, l.w1, l.w2) : null;
+        const c0 = document.createElement('td'); c0.style.cssText = 'text-align:center;padding-left:6px';
+        const cb = document.createElement('input'); cb.type = 'checkbox'; cb.checked = !l.hide; cb.style.cssText = 'width:auto;margin:0'; cb.title = 'tick = show this line on the chart';
+        cb.onchange = () => apply(() => { if (cb.checked) delete l.hide; else l.hide = true; });
+        c0.appendChild(cb); tr.appendChild(c0);
+        const add = (html, st) => { const td = document.createElement('td'); td.style.cssText = 'padding:1px 6px;text-align:center;' + (st || ''); td.innerHTML = html; tr.appendChild(td); };
+        add('#' + l.no, 'font-weight:700');
+        add(l.nm ? escapeHtml(l.nm) : 'hand-drawn', 'text-align:left');
+        ['w1', 'w2'].forEach(key => {
+          const td = document.createElement('td'); td.style.cssText = 'padding:2px 4px;text-align:center';
+          if (l.fit){
+            const inp = document.createElement('input'); inp.type = 'datetime-local'; inp.value = bkkInputStr(l[key]);
+            inp.title = 'Asia/Bangkok time \u2014 edit it to trim or extend this line; the line refits to the data by itself';
+            inp.style.cssText = 'width:182px;font:700 13px "IBM Plex Mono",monospace;color:var(--ink);background:var(--panel);border:1.5px solid var(--accent,var(--line));border-radius:4px;padding:2px 4px';
+            inp.onchange = () => {
+              const t = bkkInputToEpoch(inp.value), n1 = key === 'w1' ? t : l.w1, n2 = key === 'w2' ? t : l.w2;
+              if (!(t === t) || n2 - n1 < 120){ inp.value = bkkInputStr(l[key]); return; }   // invalid or inverted: put the old time back
+              apply(() => { l.w1 = n1; l.w2 = n2; });
+            };
+            td.appendChild(inp);
+          }
+          tr.appendChild(td);
+        });
+        add(f && isFinite(f.a) ? '<b style="color:' + deckSpeedClass(Math.abs(f.a)).c + '">' + (f.a < 0 ? '−' : '+') + Math.abs(f.a * 24).toFixed(Math.abs(f.a * 24) >= 0.01 ? 3 : 4) + '</b>' : '', '');
+        add(f && f.r2 === f.r2 ? f.r2.toFixed(2) : '', '');
+        tbody.appendChild(tr);
+      });
+    });
+    tb.appendChild(tbody); wrapT.appendChild(tb); box.appendChild(wrapT); listEl.appendChild(box); }
+  // ---- per-line details (fold away when there are many lines)
+  const detBox = document.createElement('details'); detBox.open = lines.length <= 4;
+  { const sm = document.createElement('summary'); sm.className = 'n'; sm.style.cursor = 'pointer'; sm.textContent = 'details of each line (' + lines.length + ')'; detBox.appendChild(sm); }
   let fitNo = 0;
   lines.forEach((ln, i) => {
-    const row = document.createElement('div'); row.className = 'drawline-row'; row.dataset.id = ln.id;
+    const row = document.createElement('div'); row.className = 'drawline-row'; row.dataset.id = ln.id; if (ln.hide) row.style.opacity = '.5';
     const body = document.createElement('span'); body.style.cssText = 'flex:1;min-width:0';
     if (ln.fit && rec && spec){
       const f = fitSeriesWindow(rec.u, spec, ln.nm, ln.w1, ln.w2);
@@ -3584,12 +3854,21 @@ function renderDrawLineList(chartId, listEl, onChange){
         if (f.r2 === f.r2 && f.r2 < 0.3) warns.push('weak fit');
         if (f.n < 10) warns.push('few points');
         fitNo++;
-        body.innerHTML = '<span class="fit-tag" style="background:' + col + '">F' + fitNo + '</span> <b>' + escapeHtml(ln.nm) + '</b> — slope <b>' + fmtSlope(f.a) + ' ' + un + '/h</b> (' + fmtSlope(f.a * 24) + ' ' + un + '/day) · R² ' + (f.r2 === f.r2 ? f.r2.toFixed(3) : 'n/a') + ' · n ' + f.n.toLocaleString() +
+        body.innerHTML = '<span class="fit-tag" style="background:' + col + '">#' + (ln.no || fitNo) + '</span> <b>' + escapeHtml(ln.nm) + '</b> — slope <b>' + fmtSlope(f.a) + ' ' + un + '/h</b> (' + fmtSlope(f.a * 24) + ' ' + un + '/day) · R² ' + (f.r2 === f.r2 ? f.r2.toFixed(3) : 'n/a') + ' · n ' + f.n.toLocaleString() +
           (warns.length ? ' <span class="tr-warn">⚠ ' + warns.join(', ') + '</span>' : '') +
-          '<br><span class="n">window ' + fmtDate(f.w1) + ' → ' + fmtDate(f.w2) + ' (' + (hrs < 48 ? hrs.toFixed(1) + ' h' : (hrs / 24).toFixed(1) + ' d') + ') · y = ' + fmtSlope(f.a) + '·t ' + (f.b >= 0 ? '+ ' : '− ') + Math.abs(f.b).toFixed(3) + ' (t in hours from window start)' + (f.excl ? ' · ' + f.excl + ' fault samples left out' : '') + (f.spk ? ' · ' + f.spk.toLocaleString() + ' glitch spikes left out' : '') + '</span>';
+          '<br><span style="font-size:13.5px;font-weight:700;color:var(--ink)">\u23f1 ' + fmtDate(f.w1) + ' \u2192 ' + fmtDate(f.w2) + ' (' + (hrs < 48 ? hrs.toFixed(1) + ' h' : (hrs / 24).toFixed(1) + ' d') + ')</span> <span class="n">\u00b7 y = ' + fmtSlope(f.a) + '·t ' + (f.b >= 0 ? '+ ' : '− ') + Math.abs(f.b).toFixed(3) + ' (t in hours from window start)' + (f.excl ? ' · ' + f.excl + ' fault samples left out' : '') + (f.spk ? ' · ' + f.spk.toLocaleString() + ' glitch spikes left out' : '') + '</span>';
+        if (ln.snap){
+          const kk = seriesIdxByName(rec.u, ln.nm);
+          const v1 = valueNearX(rec.u, kk, ln.w1), v2 = valueNearX(rec.u, kk, ln.w2), hh = (ln.w2 - ln.w1) / 3600;
+          const chord = (v1 === v1 && v2 === v2 && hh > 0) ? (v2 - v1) / hh : NaN;
+          const un1 = ln.u || '';
+          body.insertAdjacentHTML('beforeend', '<div class="n">snapped to <b>' + escapeHtml(ln.nm) + '</b>: start ' + fmtDate(ln.w1) + ' = ' + (v1 === v1 ? fmtSnapVal(v1, un1) : 'n/a') +
+            ' \u2192 end ' + fmtDate(ln.w2) + ' = ' + (v2 === v2 ? fmtSnapVal(v2, un1) : 'n/a') + '<br>slope above = least-squares line through every sample between the two clicks' +
+            (chord === chord ? ' \u00b7 straight start\u2192end (two points only) = ' + fmtSlope(chord) + ' ' + un1 + '/h' : '') + '</div>');
+        }
       } else {
         fitNo++;
-        body.innerHTML = '<span class="fit-tag" style="background:' + col + '">F' + fitNo + '</span> <b>' + escapeHtml(ln.nm) + '</b> — <span class="n">not enough data in this window (series hidden, filtered out or missing)</span>';
+        body.innerHTML = '<span class="fit-tag" style="background:' + col + '">#' + (ln.no || fitNo) + '</span> <b>' + escapeHtml(ln.nm) + '</b> \u2014 <span class="n">not enough data in this window (series hidden, filtered out or missing)</span>';
       }
       const sel = document.createElement('select');
       sel.title = 'fit this stretch on another series';
@@ -3620,8 +3899,9 @@ function renderDrawLineList(chartId, listEl, onChange){
       onChange();
     };
     row.append(body, del);
-    listEl.appendChild(row);
+    detBox.appendChild(row);
   });
+  listEl.appendChild(detBox);
 }
 
 // ==================== chart tools: show, filter, shift ====================
@@ -4665,7 +4945,7 @@ function makeChartNow(spec){
     measureRow.appendChild(measureBtn);
     drawLineBtn = document.createElement('button');
     drawLineBtn.textContent = 'draw & fit';
-    drawLineBtn.title = 'toggle on, then click the START and the END of the stretch you care about: the line is fitted (least squares) to the data of the series that passes closest to your two clicks. The list below shows which series, the time window, slope and R², and lets you switch to another series.';
+    drawLineBtn.title = 'toggle on, then DRAW a line along the data: press at the start, drag, release at the end (or click start, click end). You see your own stroke first, then it fits itself onto the data. The start SNAPS to the nearest real data sample (the series it snapped to is named next to the cursor); the line drawn is the least-squares line through ALL samples of that series between the two clicks, so its slope is the slope of the data over the whole stretch. The list below shows the series, the two snapped samples, slope, R² and the straight start→end slope, and lets you switch to another series.';
     measureRow.appendChild(drawLineBtn);
     wrap.appendChild(measureRow);
     measureReadout = document.createElement('div');
@@ -4967,7 +5247,7 @@ function makeChartNow(spec){
     };
     const pinRows = rows => {
       rows.forEach(r => {
-        (drawLineStore[spec.id] = drawLineStore[spec.id] || []).push({ id: drawLineIdSeq++, fit: true, pin: true, nm: r.nm, c: r.color, u: trendUnit || '', w1: spec._trend.xMin, w2: spec._trend.xMax });
+        (drawLineStore[spec.id] = drawLineStore[spec.id] || []).push({ id: drawLineIdSeq++, no: nextLineNo(spec.id), fit: true, pin: true, nm: r.nm, c: r.color, u: trendUnit || '', w1: spec._trend.xMin, w2: spec._trend.xMax });
       });
       saveDrawLineStore();
       refreshPins();
@@ -5022,70 +5302,141 @@ function makeChartNow(spec){
     // still exactly what's needed to render any lines restored from storage.
     requestAnimationFrame(() => { if (drawLineStore[spec.id] && drawLineStore[spec.id].length) refreshDrawLines(); });
 
-    let drawArmed = false, pendingPoint = null, downXY = null, previewRAF = null;
+    let drawArmed = false, pendingPoint = null, drag = null, previewRAF = null, lastMove = null;
     const clearPreview = () => {
       if (previewRAF){ cancelAnimationFrame(previewRAF); previewRAF = null; }
       if (drawPreview[spec.id]){ delete drawPreview[spec.id]; u.redraw(); }
     };
     drawLineBtn.onclick = () => {
       drawArmed = !drawArmed;
-      pendingPoint = null; downXY = null;
+      pendingPoint = null; drag = null;
       clearPreview();
       drawLineBtn.textContent = drawArmed ? 'draw & fit: on' : 'draw & fit';
       drawLineBtn.classList.toggle('on', drawArmed);
       u.over.style.cursor = drawArmed ? 'crosshair' : '';
     };
-    u.over.addEventListener('mousedown', e => { if (drawArmed) downXY = { x: e.clientX, y: e.clientY }; });
-    // Rubber-band preview: once the first point is placed, follow the cursor
-    // with a dashed line back to it (and a live K estimate) so there's
-    // something concrete to aim the second click against, instead of
-    // guessing blind until it's committed. Throttled to one redraw per
-    // frame — plain mousemove fires far faster than that.
-    u.over.addEventListener('mousemove', e => {
-      if (!drawArmed || !pendingPoint) return;
-      const rect = u.over.getBoundingClientRect();
-      if (rect.width <= 0) return;
-      const { xMin, xMax } = resolveXRange(u, spec);
-      const xVal = xMin + ((e.clientX - rect.left) / rect.width) * (xMax - xMin);
-      const yVal = u.posToVal(e.clientY - rect.top, 'y');
-      if (xVal == null || yVal == null || isNaN(xVal) || isNaN(yVal)) return;
-      const pk = pickFitSeries(u, spec, pendingPoint, { x: xVal, y: yVal });
-      drawPreview[spec.id] = { x1: pendingPoint.x, y1: pendingPoint.y, x2: xVal, y2: yVal, nm: pk ? pk.nm : null };
-      if (previewRAF) return;
-      previewRAF = requestAnimationFrame(() => { previewRAF = null; u.redraw(); });
-    });
-    u.over.addEventListener('mouseleave', () => clearPreview());
-    u.over.addEventListener('mouseup', e => {
-      if (!drawArmed || !downXY) return;
-      const moved = Math.hypot(e.clientX - downXY.x, e.clientY - downXY.y);
-      downXY = null;
-      if (moved > 4) return; // a drag (pan/zoom-select), not a point placement — leave it to uPlot's own cursor handling
-      const rect = u.over.getBoundingClientRect();
-      if (rect.width <= 0) return;
-      // x: same null-scale caveat as resolveXRange() above — go through the
-      // resolved range and a plain CSS-pixel fraction instead of
-      // u.posToVal(pos, 'x'), which divides by the (possibly still unset)
-      // internal scale bounds and silently returns 0 on an unzoomed chart.
-      const { xMin, xMax } = resolveXRange(u, spec);
-      const xVal = xMin + ((e.clientX - rect.left) / rect.width) * (xMax - xMin);
-      const yVal = u.posToVal(e.clientY - rect.top, 'y');
-      if (xVal == null || yVal == null || isNaN(xVal) || isNaN(yVal)) return;
-      if (!pendingPoint){ pendingPoint = { x: xVal, y: yVal }; return; }
-      const p1 = pendingPoint, p2 = { x: xVal, y: yVal };
-      pendingPoint = null;
-      clearPreview();
-      const pick = pickFitSeries(u, spec, p1, p2);
-      const w1 = Math.min(p1.x, p2.x), w2 = Math.max(p1.x, p2.x);
-      if (pick && w2 - w1 >= 120){
-        (drawLineStore[spec.id] = drawLineStore[spec.id] || []).push({ id: drawLineIdSeq++, fit: true, nm: pick.nm, c: SERIES_COLORS[spec.id + '|' + pick.nm], u: trendUnit || '', w1, w2 });
-      } else {
-        const { x1, y1, x2, y2 } = lineStats(p1.x, p1.y, p2.x, p2.y);
-        (drawLineStore[spec.id] = drawLineStore[spec.id] || []).push({ id: drawLineIdSeq++, x1, y1, x2, y2 });
-      }
+    const dataAt = (cx, cy) => {
+      const rect = u.over.getBoundingClientRect(), { xMin, xMax } = resolveXRange(u, spec);
+      return { rect, x: xMin + ((cx - rect.left) / rect.width) * (xMax - xMin), y: u.posToVal(cy - rect.top, 'y') };
+    };
+    const commitLine = (s1, s2, raw) => {
+      const w1 = Math.min(s1.x, s2.x), w2 = Math.max(s1.x, s2.x);
+      if (w2 - w1 < 120) return false;                                   // both ends on the same sample
+      const id = drawLineIdSeq++;
+      (drawLineStore[spec.id] = drawLineStore[spec.id] || []).push({ id, no: nextLineNo(spec.id), fit: true, snap: true, nm: s1.nm, c: SERIES_COLORS[spec.id + '|' + s1.nm], u: trendUnit || '', w1, w2 });
+      if (raw) drawAnim[id] = { t0: performance.now(), x1: raw.x1, y1: raw.y1, x2: raw.x2, y2: raw.y2 };
       saveDrawLineStore();
+      return true;
+    };
+    // tags: drag a tag to move it (works with or without draw mode); double-click = back to the automatic position
+    const tagAt = (cx, cy) => {
+      const rc = u.over.getBoundingClientRect(), px = cx - rc.left, py = cy - rc.top, hits = tagHits[spec.id] || [];
+      for (let i = hits.length - 1; i >= 0; i--){ const t = hits[i]; if (Math.abs(px - t.cx) <= t.w / 2 && Math.abs(py - t.cy) <= t.h / 2) return t; }
+      return null;
+    };
+    const lineById = id => (drawLineStore[spec.id] || []).find(l => l.id === id);
+    let tagDrag = null, tagRAF = null;
+    u.over.addEventListener('mousedown', e => {
+      if (e.button !== 0) return;
+      const t = tagAt(e.clientX, e.clientY); if (!t) return;
+      e.stopImmediatePropagation(); e.preventDefault();
+      tagDrag = { id: t.id, x0: e.clientX, y0: e.clientY, ox: t.cx - t.ax, oy: t.cy - t.ay };
+      u.over.style.cursor = 'grabbing';
+    }, true);
+    u.over.addEventListener('dblclick', e => {
+      const t = tagAt(e.clientX, e.clientY); if (!t) return;
+      e.stopImmediatePropagation(); e.preventDefault();
+      const ln = lineById(t.id); if (ln){ delete ln.tdx; delete ln.tdy; saveDrawLineStore(); u.redraw(); }
+    }, true);
+    window.addEventListener('mousemove', e => {
+      if (!tagDrag) return;
+      const ln = lineById(tagDrag.id); if (!ln) return;
+      ln.tdx = tagDrag.ox + (e.clientX - tagDrag.x0); ln.tdy = tagDrag.oy + (e.clientY - tagDrag.y0);
+      if (!tagRAF) tagRAF = requestAnimationFrame(() => { tagRAF = null; u.redraw(); });
+    });
+    window.addEventListener('mouseup', () => {
+      if (!tagDrag) return;
+      tagDrag = null; saveDrawLineStore(); u.over.style.cursor = drawArmed ? 'crosshair' : '';
+    });
+    u.over.addEventListener('mousemove', e => {
+      if (tagDrag) return;
+      const t = tagAt(e.clientX, e.clientY);
+      u.over.style.cursor = t ? 'grab' : (drawArmed ? 'crosshair' : '');
+    });
+    // draw mode takes the mouse over: uPlot's own drag-zoom / pan must not start while a line is being drawn
+    u.over.addEventListener('mousedown', e => {
+      if (!drawArmed || e.button !== 0) return;
+      e.stopImmediatePropagation(); e.preventDefault();
+      const rect = u.over.getBoundingClientRect();
+      if (rect.width <= 0) return;
+      drag = { down: { x: e.clientX, y: e.clientY }, moved: false, s1: snapToData(u, spec, e.clientX - rect.left, e.clientY - rect.top) };
+    }, true);
+    // hover (before anything is pressed) and click-click rubber band
+    u.over.addEventListener('mousemove', e => {
+      if (!drawArmed || drag) return;
+      lastMove = { cx: e.clientX, cy: e.clientY };
+      if (previewRAF) return;
+      previewRAF = requestAnimationFrame(() => {
+        previewRAF = null;
+        if (!drawArmed || !lastMove || drag) return;
+        const rect = u.over.getBoundingClientRect();
+        if (rect.width <= 0) return;
+        if (!pendingPoint){
+          const sn = snapToData(u, spec, lastMove.cx - rect.left, lastMove.cy - rect.top);
+          if (sn) drawPreview[spec.id] = { s1: sn, hover: true }; else delete drawPreview[spec.id];
+        } else {
+          const s2 = snapSameSeries(u, spec, pendingPoint.k, dataAt(lastMove.cx, lastMove.cy).x);
+          drawPreview[spec.id] = { s1: pendingPoint, s2: s2 || undefined };
+        }
+        u.redraw();
+      });
+    });
+    u.over.addEventListener('mouseleave', () => { if (!pendingPoint && !drag) clearPreview(); });
+    // dragging: your own stroke follows the mouse (no shading)
+    window.addEventListener('mousemove', e => {
+      if (!drag || !drawArmed) return;
+      if (!drag.moved && Math.hypot(e.clientX - drag.down.x, e.clientY - drag.down.y) > 4) drag.moved = true;
+      if (!drag.moved || !drag.s1) return;
+      lastMove = { cx: e.clientX, cy: e.clientY };
+      if (previewRAF) return;
+      previewRAF = requestAnimationFrame(() => {
+        previewRAF = null;
+        if (!drag || !drag.moved || !lastMove) return;
+        const d = dataAt(lastMove.cx, lastMove.cy);
+        drawPreview[spec.id] = { drag: true, s1: drag.s1, cur: { x: d.x, y: d.y }, s2: snapSameSeries(u, spec, drag.s1.k, d.x) || undefined };
+        u.redraw();
+      });
+    });
+    window.addEventListener('mouseup', e => {
+      if (!drag || !drawArmed){ drag = null; return; }
+      const d = drag; drag = null;
+      if (d.moved){                                                        // a drawn stroke: keep it visible, then fit it
+        if (!d.s1){ clearPreview(); return; }
+        const cur = dataAt(e.clientX, e.clientY), s2 = snapSameSeries(u, spec, d.s1.k, cur.x);
+        pendingPoint = null;
+        let raw = { x1: d.s1.x, y1: d.s1.y, x2: cur.x, y2: cur.y };
+        if (raw.x2 < raw.x1) raw = { x1: raw.x2, y1: raw.y2, x2: raw.x1, y2: raw.y1 };
+        clearPreview();
+        if (s2 && commitLine(d.s1, s2, raw)) refreshDrawLines();
+        return;
+      }
+      // a plain click: first click = start, next click = end (and the end starts the next line)
+      const rect = u.over.getBoundingClientRect();
+      if (rect.width <= 0) return;
+      if (!pendingPoint){
+        const sn = snapToData(u, spec, d.down.x - rect.left, d.down.y - rect.top);
+        if (!sn) return;
+        pendingPoint = sn; drawPreview[spec.id] = { s1: sn }; u.redraw();
+        return;
+      }
+      const s1 = pendingPoint, s2 = snapSameSeries(u, spec, s1.k, dataAt(d.down.x, d.down.y).x);
+      if (!s2 || !commitLine(s1, s2, null)) return;
+      pendingPoint = (s2.x >= s1.x) ? s2 : s1;
+      drawPreview[spec.id] = { s1: pendingPoint };
       refreshDrawLines();
     });
-    window.addEventListener('keydown', e => { if (e.key === 'Escape' && pendingPoint){ pendingPoint = null; clearPreview(); } });
+    u.over.addEventListener('contextmenu', e => { if (drawArmed){ e.preventDefault(); pendingPoint = null; drag = null; clearPreview(); } });
+    window.addEventListener('keydown', e => { if (e.key === 'Escape' && (pendingPoint || drag)){ pendingPoint = null; drag = null; clearPreview(); } });
   }
 
   const legendLabelEls = [];
@@ -5222,9 +5573,9 @@ function buildEnvelopePoints(days, totals, rolling3, fromEpoch, toEpoch){
     if (isNaN(totals[i]) || isNaN(rolling3[i])) continue;
     pts.push({ t: days[i], x: rolling3[i], y: totals[i] });
   }
-  if (!pts.length) return { xs: [], ys: [], latestPt: null };
+  if (!pts.length) return { xs: [], ys: [], ts: [], latestPt: null };
   pts.sort((a, b) => a.t - b.t);
-  return { xs: pts.map(p => p.x), ys: pts.map(p => p.y), latestPt: pts[pts.length - 1] };
+  return { xs: pts.map(p => p.x), ys: pts.map(p => p.y), ts: pts.map(p => p.t), latestPt: pts[pts.length - 1] };
 }
 function makeEnvelopeChart(spec){
   const st = spec.chOwner;
@@ -5265,6 +5616,24 @@ function makeEnvelopeChart(spec){
   toLbl.appendChild(toInput);
   ctrlRow.append(fromLbl, toLbl, applyBtn, resetBtn);
   wrap.appendChild(ctrlRow);
+  fromInput.min = toInput.min = bkkDateStr(days[0]);
+  fromInput.max = toInput.max = bkkDateStr(days[days.length - 1]);
+  // quick ranges, counted back from the last day with data (the whole measured period is "all")
+  const presetRow = document.createElement('div');
+  presetRow.className = 'view-toggle envelope-controls';
+  const presetBtns = [];
+  [['all measured days', 0], ['last 7 d', 7], ['last 14 d', 14], ['last 30 d', 30], ['last 60 d', 60]].forEach(([txt, n]) => {
+    const b = document.createElement('button'); b.textContent = txt; b.dataset.n = n;
+    b.onclick = () => {
+      const last = days[days.length - 1];
+      const first = n ? Math.max(days[0], last - (n - 1) * 86400) : days[0];
+      fromInput.value = bkkDateStr(first); toInput.value = bkkDateStr(last);
+      build(first, last + 86400 - 1);
+      presetBtns.forEach(x => x.classList.toggle('on', x === b));
+    };
+    presetBtns.push(b); presetRow.appendChild(b);
+  });
+  wrap.appendChild(presetRow);
 
   // set the AP-Model level 1 (watch) / level 2 (critical) rainfall criteria
   // directly on this chart — the same shared thresholds.rainDaily/rain3day
@@ -5320,11 +5689,20 @@ function makeEnvelopeChart(spec){
 
   document.getElementById('charts').appendChild(wrap);
 
+  holder.style.position = 'relative';
+  const tip = document.createElement('div');
+  tip.className = 'env-tip';
+  tip.style.cssText = 'position:absolute;display:none;pointer-events:none;z-index:5;background:var(--panel,#fff);color:var(--ink,#141413);border:1px solid var(--line,#999);border-radius:6px;padding:5px 8px;font:11px "IBM Plex Mono",monospace;line-height:1.5;box-shadow:0 2px 8px rgba(0,0,0,.25);white-space:nowrap';
+  holder.appendChild(tip);
+  let hoverIdx = -1, curPts = { xs: [], ys: [], ts: [] };
+  const fmtDay = t => new Date((t + 7 * 3600) * 1000).toLocaleDateString('en-GB', { timeZone: 'UTC', weekday: 'short', day: '2-digit', month: 'short', year: 'numeric' });
+  const levelOf = (v, w, c) => (c != null && v >= c) ? ' \u2265 critical' : (w != null && v >= w) ? ' \u2265 watch' : '';
   const entry = { wrap, u: null, section: spec.section, hasSecondary: false, isEnvelope: true };
   envTools.appendChild(makePngButton(() => entry.u && entry.u.ctx.canvas, spec.id));
 
   function build(fromEpoch, toEpoch){
-    const { xs, ys, latestPt } = buildEnvelopePoints(days, totals, rolling3, fromEpoch, toEpoch);
+    const { xs, ys, ts, latestPt } = buildEnvelopePoints(days, totals, rolling3, fromEpoch, toEpoch);
+    curPts = { xs, ys, ts }; hoverIdx = -1; tip.style.display = 'none';
     if (entry.u) entry.u.destroy();
     entry.u = newUPlot({
       width: holder.clientWidth || 900,
@@ -5343,10 +5721,53 @@ function makeEnvelopeChart(spec){
         { label: 'rainfall path', stroke: dotColor, width: 1.5, points: { show: true, size: 5, fill: dotColor, stroke: dotColor } },
       ],
       legend: { show: false },
-      hooks: { draw: [ drawThresholdsHook(envelopeThresholds), drawLatestPointHook(() => latestPt) ] },
+      hooks: { draw: [ drawThresholdsHook(envelopeThresholds), drawLatestPointHook(() => latestPt), u => {
+        // dates: first day of the range always labelled, hovered day ringed
+        if (!curPts.xs.length) return;
+        const { ctx } = u, dpr = devicePixelRatio || 1;
+        ctx.save();
+        ctx.beginPath(); ctx.rect(u.bbox.left, u.bbox.top, u.bbox.width, u.bbox.height); ctx.clip();
+        ctx.font = (10 * dpr) + 'px "IBM Plex Mono", monospace'; ctx.textBaseline = 'bottom'; ctx.fillStyle = COLOR_INK || '#141413';
+        const lab = (i, dx, dy) => { const px = u.valToPos(curPts.xs[i], 'x', true), py = u.valToPos(curPts.ys[i], 'y', true); ctx.fillText(fmtShort(curPts.ts[i]).replace(/,? \d\d:\d\d$/, ''), px + dx * dpr, py + dy * dpr); };
+        lab(0, 6, -6);
+        if (hoverIdx >= 0){
+          const px = u.valToPos(curPts.xs[hoverIdx], 'x', true), py = u.valToPos(curPts.ys[hoverIdx], 'y', true);
+          ctx.lineWidth = 2 * dpr; ctx.strokeStyle = dotColor; ctx.fillStyle = COLOR_PANEL;
+          ctx.beginPath(); ctx.arc(px, py, 8 * dpr, 0, 2 * Math.PI); ctx.fill(); ctx.stroke();
+          ctx.beginPath(); ctx.arc(px, py, 3.5 * dpr, 0, 2 * Math.PI); ctx.fillStyle = dotColor; ctx.fill();
+        }
+        ctx.restore();
+      } ] },
     }, [xs, ys], holder);
+    // hover / tap: nearest day within 18 px tells its date and both rainfall values
+    const over = entry.u.over;
+    const showTip = (cx, cy) => {
+      const rect = over.getBoundingClientRect();
+      const lx = cx - rect.left, ly = cy - rect.top;
+      let bi = -1, bd = 18;
+      for (let i = 0; i < curPts.xs.length; i++){
+        const d = Math.hypot(entry.u.valToPos(curPts.xs[i], 'x') - lx, entry.u.valToPos(curPts.ys[i], 'y') - ly);
+        if (d < bd){ bd = d; bi = i; }
+      }
+      if (bi !== hoverIdx){ hoverIdx = bi; entry.u.redraw(false); }
+      if (bi < 0){ tip.style.display = 'none'; over.style.cursor = ''; return; }
+      over.style.cursor = 'pointer';
+      const dy = curPts.ys[bi], d3 = curPts.xs[bi];
+      tip.innerHTML = '<b>' + fmtDay(curPts.ts[bi]) + '</b><br>daily ' + dy.toFixed(1) + ' mm' + levelOf(dy, thresholds.rainDaily.warn, thresholds.rainDaily.crit) +
+        '<br>3-day ' + d3.toFixed(1) + ' mm' + levelOf(d3, thresholds.rain3day.warn, thresholds.rain3day.crit) + '<br><span style="opacity:.65">day ' + (bi + 1) + ' of ' + curPts.xs.length + ' in range</span>';
+      tip.style.display = 'block';
+      const hr = holder.getBoundingClientRect();
+      let tx = cx - hr.left + 14, ty = cy - hr.top - 12;
+      if (tx + tip.offsetWidth > hr.width - 4) tx = cx - hr.left - tip.offsetWidth - 14;
+      if (ty + tip.offsetHeight > hr.height - 4) ty = hr.height - tip.offsetHeight - 4;
+      tip.style.left = Math.max(2, tx) + 'px'; tip.style.top = Math.max(2, ty) + 'px';
+    };
+    over.addEventListener('mousemove', e => showTip(e.clientX, e.clientY));
+    over.addEventListener('mouseleave', () => { hoverIdx = -1; tip.style.display = 'none'; entry.u.redraw(false); });
+    over.addEventListener('click', e => showTip(e.clientX, e.clientY));
+    over.addEventListener('touchstart', e => { const t = e.touches[0]; if (t) showTip(t.clientX, t.clientY); }, { passive: true });
     caption.textContent = latestPt
-      ? 'most recent in range: ' + fmtDate(latestPt.t) + ' — daily ' + latestPt.y.toFixed(1) + ' mm, 3-day cumulative ' + latestPt.x.toFixed(1) + ' mm'
+      ? 'range ' + fmtDay(ts[0]) + ' → ' + fmtDay(latestPt.t) + ' (' + xs.length + ' days) · most recent in range: ' + fmtDate(latestPt.t) + ' — daily ' + latestPt.y.toFixed(1) + ' mm, 3-day cumulative ' + latestPt.x.toFixed(1) + ' mm · point at a dot to see its date'
       : 'no data in the selected range.';
   }
   build(days[0], days[days.length - 1] + 86400 - 1);
@@ -5358,7 +5779,9 @@ function makeEnvelopeChart(spec){
     if (!isFinite(f) || !isFinite(t) || f > t) return;
     build(f, t);
   };
+  fromInput.onchange = toInput.onchange = () => { presetBtns.forEach(x => x.classList.remove('on')); applyBtn.onclick(); };
   resetBtn.onclick = () => {
+    presetBtns.forEach(x => x.classList.toggle('on', x.dataset.n === '0'));
     fromInput.value = bkkDateStr(days[0]);
     toInput.value = bkkDateStr(days[days.length - 1]);
     build(days[0], days[days.length - 1] + 86400 - 1);
@@ -8088,7 +8511,7 @@ function init(){
 
   const gFit = grp(anaB, 'Fit a line');
   btn(gFit, '', 'Trendline', () => chartTool('trendline'), 'straight line through the window you are looking at (zoom first)');
-  btn(gFit, '', 'Draw & fit', () => chartTool('draw'), 'click two points on the chart; the nearest series is fitted');
+  btn(gFit, '', 'Draw line', () => chartTool('draw'), 'click a START and an END point; both snap to real data samples and the slope of that series over the whole stretch is shown');
   btn(gFit, '', 'Measure rate', () => chartTool('measure'), 'rate of change in degrees per hour over the zoomed window');
   const gSlide = grp(anaB, 'Slide method');
   btn(gSlide, '', 'Auto trend lines', () => { if (window.PSWTrendsUI) PSWTrendsUI.open(); }, 'step-corrected daily tilt with trend lines for every stretch, speed classes, a table, and its own Filter and Shift - the same analysis as the slides');
