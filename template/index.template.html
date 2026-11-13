@@ -1795,7 +1795,7 @@ function ghostExtent(u, spec){
   const xs = u.data[0]; if (!xs || !xs.length) return null;
   const deg = trendUnitFor(spec) === '°';
   const x0 = u.scales.x.min != null ? u.scales.x.min : xs[0], x1 = u.scales.x.max != null ? u.scales.x.max : xs[xs.length - 1];
-  const first = {}, lastT = {}; cfg.splices.forEach(sp => sp.channels.forEach(nm => { first[nm] = first[nm] == null ? sp.t : Math.min(first[nm], sp.t); const e = sp.t2 != null ? sp.t2 : Infinity; lastT[nm] = lastT[nm] == null ? e : Math.max(lastT[nm], e); }));
+  const first = {}, lastT = {}; cfg.splices.forEach(sp => sp.channels.forEach(nm => { first[nm] = first[nm] == null ? ((sp.cut && sp.b != null) ? sp.b : sp.t) : Math.min(first[nm], (sp.cut && sp.b != null) ? sp.b : sp.t); const e = sp.t2 != null ? sp.t2 : Infinity; lastT[nm] = lastT[nm] == null ? e : Math.max(lastT[nm], e); }));
   let lo = Infinity, hi = -Infinity;
   Object.keys(first).forEach(nm => {
     const k = seriesIdxByName(u, nm); if (k < 1 || u.series[k].show === false) return;
@@ -1813,7 +1813,7 @@ function drawGhostHook(spec, chOwner){
     const cfg = shiftStore[spec.id];
     if (!cfg || !cfg.splices || !cfg.splices.length || !chOwner || !chOwner.CH) return;
     const first = {}, lastT = {};
-    cfg.splices.forEach(sp => sp.channels.forEach(nm => { first[nm] = first[nm] == null ? sp.t : Math.min(first[nm], sp.t); const e = sp.t2 != null ? sp.t2 : Infinity; lastT[nm] = lastT[nm] == null ? e : Math.max(lastT[nm], e); }));
+    cfg.splices.forEach(sp => sp.channels.forEach(nm => { first[nm] = first[nm] == null ? ((sp.cut && sp.b != null) ? sp.b : sp.t) : Math.min(first[nm], (sp.cut && sp.b != null) ? sp.b : sp.t); const e = sp.t2 != null ? sp.t2 : Infinity; lastT[nm] = lastT[nm] == null ? e : Math.max(lastT[nm], e); }));
     const xs = u.data[0]; if (!xs || !xs.length) return;
     const { ctx } = u, dpr = devicePixelRatio || 1;
     const left = u.bbox.left, top = u.bbox.top, width = u.bbox.width, height = u.bbox.height;
@@ -4030,6 +4030,7 @@ function maskFaultNaN(arr, fault){
 // ---- splice (join segments after a sensor outage / swap / reinstall) -------
 // A chart's splice config: { splices: [ { id, t, t2?, b?, channels:[nm], mode:'auto'|'manual', hours, add } ] }
 //   t      = epoch (s) where the NEW segment starts; every sample at/after t gets the offset added
+//   cut    = true: t is point B, b is point A; the samples between A and B are removed (shown only as the faint old copy)
 //   t2     = optional end of the moved stretch (samples at/after t2 are left as they are); without it the shift runs to the latest data
 //   auto   = offset chosen so the new segment continues from where the old one stopped:
 //            add = -( mean(first `hours` h of valid data from t) - mean(last `hours` h of valid data before t) )
@@ -4051,7 +4052,7 @@ function spliceNormalizeCfg(cfg){
 function spliceIsBad(arr, fault, i){ return arr[i] !== arr[i] || (fault && fault[i]); }
 function spliceAutoStep(xs, arr, fault, sp){
   const W = (sp.hours || 24) * 3600;
-  const anchor = sp.b != null ? sp.b : sp.t;
+  const anchor = (sp.b != null ? sp.b : sp.t) + (sp.cut ? 1 : 0);        // with two points the sample AT A still belongs to the 'before' side
   let ib = lowerBound(xs, anchor, 0, xs.length) - 1;
   while (ib >= 0 && spliceIsBad(arr, fault, ib)) ib--;
   let ia = lowerBound(xs, sp.t, 0, xs.length);
@@ -4130,6 +4131,7 @@ function computeChannelSeriesBase(chOwner, nm, filterOn, shiftCfg, rangeCfg){
     else { const st = spliceAutoStep(xs, out, fault, sp); if (st == null) return; add = -st; }
     const iEnd = sp.t2 != null ? lowerBound(xs, sp.t2, 0, xs.length) : xs.length;          // t2 = where the moved stretch ends (empty = latest data)
     for (let i = lowerBound(xs, sp.t, 0, xs.length); i < iEnd; i++) out[i] += add;
+    if (sp.cut && sp.b != null){ const iB = lowerBound(xs, sp.t, 0, xs.length); for (let i = lowerBound(xs, sp.b, 0, xs.length); i < iB; i++) if (xs[i] > sp.b) out[i] = NaN; }   // the stretch between A and B is not used
     const rec = SPLICE_ADD.get(sp) || {}; rec[nm] = add; SPLICE_ADD.set(sp, rec);
   });
   return out;
@@ -4178,7 +4180,8 @@ function drawShiftBoundaryHook(chartId){
       const xPos = u.valToPos(sp.t, 'x', true);
       if (xPos == null || isNaN(xPos) || xPos < left - 1 || xPos > left + width + 1) return;
       ctx.beginPath(); ctx.moveTo(xPos, top); ctx.lineTo(xPos, top + height); ctx.stroke();
-      ctx.fillText('from', xPos + 3 * dpr, top + 2 * dpr);
+      ctx.fillText(sp.cut ? 'B' : 'from', xPos + 3 * dpr, top + 2 * dpr);
+      if (sp.cut && sp.b != null && !seen.has('a' + sp.b)){ seen.add('a' + sp.b); const xa = u.valToPos(sp.b, 'x', true); if (xa != null && !isNaN(xa) && xa >= left - 1 && xa <= left + width + 1){ ctx.beginPath(); ctx.moveTo(xa, top); ctx.lineTo(xa, top + height); ctx.stroke(); ctx.fillText('A', xa + 3 * dpr, top + 2 * dpr); } }
     });
     cfg.splices.forEach(sp => {
       if (sp.t2 == null || seen.has('e' + sp.t2)) return; seen.add('e' + sp.t2);
@@ -4441,14 +4444,14 @@ function openFilterEditor(btn, u, spec, chOwner, primaryNames, filterBadge){
 }
 
 function openShiftEditor(btn, u, spec, primaryNames, chOwner, badge){
-  const draft = spliceDraft[spec.id] = spliceDraft[spec.id] || { channels: [], sensor: '', t: '', t2: '', mode: 'auto', hours: 24, add: 0, snap: true, info: '' };
+  const draft = spliceDraft[spec.id] = spliceDraft[spec.id] || { channels: [], sensor: '', a: '', bt: '', minutes: 60, info: '' };
   const cfg = shiftStore[spec.id];
   shiftPopover.innerHTML = '';
   shiftPopover.style.width = '330px'; shiftPopover.style.maxHeight = 'calc(100vh - 20px)'; shiftPopover.style.overflowY = 'auto';
   const mk = (tag, cls, txt) => { const e = document.createElement(tag); if (cls) e.className = cls; if (txt != null) e.textContent = txt; return e; };
 
-  shiftPopover.appendChild(mk('div', 'cf-title', 'Shift - move one stretch of a sensor so the line joins up'));
-  const hint = mk('div', 'note', 'Choose a sensor, then the stretch to move: FROM = where its level changed (sensor swap / reinstall), TO = where the stretch ends (leave empty = until the latest data). The stretch is moved so the line continues from the old level (auto) or by a value you type (manual). Several jumps in one line (e.g. a swap and a later reinstall)? Add one shift per jump, oldest first - the "join" button in the list does it in one click. A run of exact 0 readings after a real level is a sensor dropout and counts as no data. Visual only - the raw data is never changed.');
+  shiftPopover.appendChild(mk('div', 'cf-title', 'Shift - join the data after a jump to the data before it'));
+  const hint = mk('div', 'note', 'Pick two points around the jump: A (last good data before) and B (first good data after). The difference between them is taken away from everything from B on, so the line continues from A. The data between A and B is not used (faint dashed). Several jumps? Do one shift per jump, oldest first. Runs of exact 0 readings after a real level are sensor dropouts and count as no data. Visual only - the raw data is never changed.');
   hint.style.cssText = 'font-size:10px;margin:0 0 8px';
   shiftPopover.appendChild(hint);
 
@@ -4459,7 +4462,7 @@ function openShiftEditor(btn, u, spec, primaryNames, chOwner, badge){
       const rec = SPLICE_ADD.get(sp) || {};
       const adds = sp.channels.map(nm => nm + ' ' + (rec[nm] == null ? '?' : ((rec[nm] >= 0 ? '+' : '') + rec[nm].toFixed(3)))).slice(0, 3).join(', ') + (sp.channels.length > 3 ? ' …' : '');
       const row = mk('div'); row.style.cssText = 'display:flex;gap:6px;align-items:flex-start;font-size:11px';
-      const txt = mk('span', null, fmtDate(sp.t) + (sp.t2 != null ? ' → ' + fmtDate(sp.t2) : ' → latest') + ' · ' + (sp.mode === 'manual' ? 'manual' : 'auto ' + (sp.hours || 24) + 'h') + ' · ' + adds);
+      const txt = mk('span', null, (sp.cut && sp.b != null ? 'A ' + fmtDate(sp.b) + ' → B ' + fmtDate(sp.t) + ' (between left out)' : fmtDate(sp.t) + (sp.t2 != null ? ' → ' + fmtDate(sp.t2) : ' → latest')) + ' · ' + (sp.mode === 'manual' ? 'manual' : 'auto ' + (sp.hours >= 1 ? sp.hours + 'h' : Math.round((sp.hours || 24) * 60) + ' min')) + ' · ' + adds);
       txt.style.flex = '1';
       const del = mk('button', null, '×'); del.type = 'button'; del.title = 'remove this splice';
       del.onclick = () => {
@@ -4478,7 +4481,7 @@ function openShiftEditor(btn, u, spec, primaryNames, chOwner, badge){
     shiftPopover.appendChild(exist);
   }
 
-  // ---- add form: 1 sensor, 2 range (from - to), 3 how much
+  // ---- add form: 1 sensor, 2 two points A and B
   shiftPopover.appendChild(mk('div', 'cf-title', 'add a shift'));
   const stepLab = txt => { const d = mk('div', null, txt); d.style.cssText = 'font:700 11.5px "IBM Plex Mono",monospace;margin:8px 0 3px;color:var(--ink)'; return d; };
   const reopen = () => openShiftEditor(btn, u, spec, primaryNames, chOwner, badge);
@@ -4494,19 +4497,16 @@ function openShiftEditor(btn, u, spec, primaryNames, chOwner, badge){
   chSel.onchange = () => { draft.sensor = chSel.value; reopen(); };
   shiftPopover.appendChild(chSel);
 
+  // the difference between the two points on the CURRENT (already corrected) curve; null when a point has no usable data
+  const diffFor = (nm, tA, tB, hrs) => {
+    const k = seriesIdxByName(u, nm); if (k < 1 || !u.data[k]) return null;
+    const a2 = Float64Array.from(u.data[k]), dz = deadZeroMask(a2); for (let i = 0; i < a2.length; i++) if (dz[i]) a2[i] = NaN;
+    return spliceAutoStep(chOwner.xs, a2, null, { b: tA, t: tB, hours: hrs, cut: true });
+  };
   // one place that really adds a shift (the form button and the 'join' button of every jump use it)
   const addShiftNow = o => {
-    let { t, t2, b } = o; const info = [];
-    if (o.snap && o.channels.length === 1){                       // clicks are never exact: use the real jump that lies within 6 h
-      const s1 = snapToStepTime(chOwner, o.channels[0], t, 12 * 3600);
-      if (s1){ t = s1.t; b = s1.b; info.push('FROM moved onto the real jump at ' + fmtDate(s1.t) + ' (' + sgn(s1.d) + '°)'); }
-      if (t2 != null){ const s2 = snapToStepTime(chOwner, o.channels[0], t2, 12 * 3600); if (s2 && s2.t > t){ t2 = s2.t; info.push('TO moved onto the real jump at ' + fmtDate(s2.t) + ' (' + sgn(s2.d) + '°)'); } }
-    }
     const cur = shiftStore[spec.id] || { splices: [] };
-    const sp = { id: cur.splices.reduce((m, s) => Math.max(m, s.id || 0), 0) + 1, t, channels: o.channels.slice(), mode: o.mode };
-    if (t2 != null) sp.t2 = t2;
-    if (b != null && isFinite(b) && b < t) sp.b = b;
-    if (o.mode === 'manual') sp.add = o.add; else sp.hours = Math.min(168, Math.max(1, o.hours));
+    const sp = { id: cur.splices.reduce((m, s) => Math.max(m, s.id || 0), 0) + 1, t: o.tB, b: o.tA, cut: true, channels: o.channels.slice(), mode: 'auto', hours: o.hours };
     cur.splices.push(sp);
     shiftStore[spec.id] = cur;
     rebuildPrimaryData(u, chOwner, primaryNames, spec.id);
@@ -4519,11 +4519,14 @@ function openShiftEditor(btn, u, spec, primaryNames, chOwner, badge){
     saveShiftStore();
     if (u.scales.y._rangeOrig === undefined) setScaleAuto(u, 'y');
     refreshShiftBadge(badge, spec.id);
-    if (!failed.length){ const ad = rec[o.channels[0]]; if (ad != null) info.push('moved ' + o.channels[0] + ' by ' + sgn(ad) + '° from ' + fmtDate(t) + (t2 != null ? ' to ' + fmtDate(t2) : ' to the latest data')); }
+    const info = [];
+    if (!failed.length){ const ad = rec[o.channels[0]]; if (ad != null) info.push('done: ' + o.channels[0] + ' from ' + fmtDate(o.tB) + ' on moved by ' + sgn(ad) + '°; the data between ' + fmtDate(o.tA) + ' and ' + fmtDate(o.tB) + ' is left out (faint dashed)'); }
     return { failed, info };
   };
 
-  shiftPopover.appendChild(stepLab('2  range to move'));
+  shiftPopover.appendChild(stepLab('2  pick two points'));
+  const how = mk('div', 'note', 'A = the last good data BEFORE the jump, B = the first good data AFTER it. The tool takes the difference between the two points and moves everything from B on by it, so the line continues from A. The data between A and B is not used: it stays only as a faint dashed copy of the old data.');
+  how.style.cssText = 'font-size:10.5px;margin:0 0 6px'; shiftPopover.appendChild(how);
   const pickOnChart = key => {
     closeShiftPopover();
     let down = null;
@@ -4537,7 +4540,6 @@ function openShiftEditor(btn, u, spec, primaryNames, chOwner, badge){
       e.stopPropagation(); e.preventDefault();
       cleanup();
       draft[key] = fmtBkkLocal(Math.round(tv / 60) * 60);
-      if (key === 't') draft.b = null;
       reopen();
     };
     u.over.addEventListener('mousedown', onDown, true);
@@ -4545,66 +4547,62 @@ function openShiftEditor(btn, u, spec, primaryNames, chOwner, badge){
     u.over.style.cursor = 'crosshair';
     window.addEventListener('keydown', function esc(ev){ if (ev.key === 'Escape'){ cleanup(); window.removeEventListener('keydown', esc); } });
   };
-  const timeRow = (label, key, withClear) => {
+  const prevBox = mk('div', 'note'); prevBox.style.cssText = 'font-size:11px;margin:4px 0 6px;font-weight:700';
+  const timeRow = (label, key) => {
     const box = mk('div'); box.style.marginBottom = '6px';
     const lab = mk('div', 'note', label); lab.style.cssText = 'font-size:10.5px;margin-bottom:2px';
     const line = mk('div'); line.style.cssText = 'display:flex;gap:6px;align-items:center;flex-wrap:wrap';
     const inp = document.createElement('input'); inp.type = 'datetime-local'; inp.value = draft[key] || ''; inp.style.cssText = 'font:12px "IBM Plex Mono",monospace';
-    inp.onchange = () => { draft[key] = inp.value; if (key === 't') draft.b = null; };
+    inp.onchange = () => { draft[key] = inp.value; updatePreview(); };
     const pick = mk('button', null, 'pick on chart'); pick.type = 'button'; pick.style.fontSize = '11px';
     pick.title = 'the window closes; click the chart at that time and it reopens with the time filled in (Esc = cancel)';
     pick.onclick = () => pickOnChart(key);
     line.append(inp, pick);
-    if (withClear){ const clr = mk('button', null, 'clear'); clr.type = 'button'; clr.style.fontSize = '11px'; clr.onclick = () => { draft[key] = ''; inp.value = ''; }; line.appendChild(clr); }
     box.append(lab, line); shiftPopover.appendChild(box);
     return inp;
   };
-  const tIn = timeRow('FROM - where the level changed (Bangkok time)', 't', false);
-  const t2In = timeRow('TO - leave EMPTY to move this and everything after it (the usual case). Fill it only if the data returns to its old level after the stretch', 't2', true);
-  const snapLab = mk('label'); snapLab.style.cssText = 'display:flex;gap:6px;align-items:flex-start;font-size:11px;margin-bottom:6px';
-  const snapCb = document.createElement('input'); snapCb.type = 'checkbox'; snapCb.checked = draft.snap !== false; snapCb.style.width = 'auto'; snapCb.onchange = () => { draft.snap = snapCb.checked; };
-  snapLab.append(snapCb, document.createTextNode(' snap FROM / TO onto the real jump when there is one within 12 h (a click is never exact)'));
-  shiftPopover.appendChild(snapLab);
+  const aIn = timeRow('POINT A - last good data before the jump (Bangkok time)', 'a');
+  const bIn = timeRow('POINT B - first good data after the jump (Bangkok time)', 'bt');
+  const avgRow = mk('label'); avgRow.style.cssText = 'display:flex;gap:6px;align-items:center;flex-wrap:wrap;font-size:11.5px;margin-bottom:4px';
+  const minIn = document.createElement('input'); minIn.type = 'number'; minIn.min = '1'; minIn.max = '720'; minIn.step = '1'; minIn.value = draft.minutes || 60; minIn.style.width = '64px';
+  avgRow.append(document.createTextNode('level at each point = average of '), minIn, document.createTextNode(' min of good data (before A / after B)'));
+  shiftPopover.appendChild(avgRow);
+  shiftPopover.appendChild(prevBox);
+  const updatePreview = () => {
+    const tA = parseBkkLocal(aIn.value), tB = parseBkkLocal(bIn.value);
+    draft.minutes = Math.max(1, Number(minIn.value) || 60);
+    prevBox.textContent = '';
+    if (!isFinite(tA) || !isFinite(tB)){ prevBox.textContent = 'pick A and B to see the difference'; return; }
+    if (tB <= tA){ prevBox.textContent = 'B must be later than A'; return; }
+    const nm = draft.sensor === '*' ? firstShown : draft.sensor, d = diffFor(nm, tA, tB, draft.minutes / 60);
+    prevBox.textContent = d == null ? 'no good data before A or after B for ' + nm : 'difference B − A = ' + sgn(d) + '°  →  from B on the data moves by ' + sgn(-d) + '°';
+  };
+  minIn.onchange = updatePreview;
+  updatePreview();
 
-  shiftPopover.appendChild(stepLab('3  how much to move it'));
-  const modeRow = mk('div'); modeRow.style.cssText = 'display:flex;flex-direction:column;gap:6px;margin-bottom:8px;font-size:11.5px';
-  const autoLab = mk('label'); autoLab.style.cssText = 'display:flex;gap:6px;align-items:center;flex-wrap:wrap';
-  const rAuto = document.createElement('input'); rAuto.type = 'radio'; rAuto.name = 'splmode'; rAuto.checked = draft.mode !== 'manual';
-  const hrsIn = document.createElement('input'); hrsIn.type = 'number'; hrsIn.min = '1'; hrsIn.max = '168'; hrsIn.step = '1'; hrsIn.value = draft.hours || 24; hrsIn.style.width = '56px';
-  autoLab.append(rAuto, document.createTextNode(' auto - join the old level (compare '), hrsIn, document.createTextNode(' h each side of FROM)'));
-  const manLab = mk('label'); manLab.style.cssText = 'display:flex;gap:6px;align-items:center;flex-wrap:wrap';
-  const rMan = document.createElement('input'); rMan.type = 'radio'; rMan.name = 'splmode'; rMan.checked = draft.mode === 'manual';
-  const addIn = document.createElement('input'); addIn.type = 'number'; addIn.step = 'any'; addIn.value = draft.add || 0; addIn.style.width = '80px';
-  manLab.append(rMan, document.createTextNode(' manual - add '), addIn, document.createTextNode(' to the stretch'));
-  rAuto.style.width = 'auto'; rMan.style.width = 'auto';
-  const syncDraft = () => { draft.mode = rMan.checked ? 'manual' : 'auto'; draft.hours = Number(hrsIn.value) || 24; draft.add = Number(addIn.value) || 0; };
-  [rAuto, rMan, hrsIn, addIn].forEach(e => e.onchange = syncDraft);
-  modeRow.append(autoLab, manLab);
-  shiftPopover.appendChild(modeRow);
-
-  // where does the chosen sensor jump? every gap in the data and every sudden step, oldest first. 'join' = move everything after that jump so the line continues
+  // where does the chosen sensor jump? every gap in the data and every sudden step, oldest first. 'join' = take A and B around that jump and shift at once
   const jNames = draft.sensor === '*' ? primaryNames : [draft.sensor];
   const hoursTxt = h => (h < 1 ? Math.max(1, Math.round(h * 60)) + ' min' : h < 48 ? h.toFixed(0) + ' h' : (h / 24).toFixed(1) + ' d');
-  const jumps = findBreakCandidates(chOwner, jNames, 1).map(c => ({ nm: c.nm, t: c.t1, b: null, hours: 24, text: c.nm + ' · no data ' + fmtDate(c.t0) + ' → ' + fmtDate(c.t1) + ' (' + hoursTxt(c.hours) + ') · level change ' + sgn(c.jump) }));
+  const jumps = findBreakCandidates(chOwner, jNames, 1).map(c => ({ nm: c.nm, tA: c.t0, tB: c.t1, text: c.nm + ' · no data ' + fmtDate(c.t0) + ' → ' + fmtDate(c.t1) + ' (' + hoursTxt(c.hours) + ') · level change ' + sgn(c.jump) }));
   if (trendUnitFor(spec) === '°') findStepCandidates(chOwner, jNames, 0.05).forEach(e => {
     const w = e.items.filter(it => jNames.includes(it.nm)).sort((p, q) => Math.abs(q.delta) - Math.abs(p.delta))[0]; if (!w) return;
-    jumps.push({ nm: w.nm, t: Math.ceil((e.t1 + 60) / 60) * 60, b: e.t0 - 60, hours: 1, text: w.nm + ' · sudden step at ' + fmtDate(e.t0) + ' · ' + sgn(w.delta) + '°' });
+    jumps.push({ nm: w.nm, tA: e.t0 - 60, tB: Math.ceil((e.t1 + 60) / 60) * 60, text: w.nm + ' · sudden step at ' + fmtDate(e.t0) + ' · ' + sgn(w.delta) + '°' });
   });
-  jumps.sort((p, q) => p.t - q.t);
+  jumps.sort((p, q) => p.tB - q.tB);
   const jBox = document.createElement('details'); jBox.open = true; jBox.style.marginBottom = '8px';
   const jSum = mk('summary', 'note', 'where does ' + (draft.sensor === '*' ? 'a channel' : draft.sensor) + ' jump? (' + jumps.length + ' found, oldest first)'); jSum.style.cursor = 'pointer'; jBox.appendChild(jSum);
-  jBox.appendChild(mk('div', 'note', 'click a line = fill FROM · "join" = at once move everything after that jump so the line continues (do it for each jump, oldest first)'));
+  jBox.appendChild(mk('div', 'note', 'click a line = fill A and B from it · "join" = fill them and shift at once (do it for each jump, oldest first)'));
   const jList = mk('div', 'cf-list'); jList.style.maxHeight = '170px';
-  if (!jumps.length) jList.appendChild(mk('div', 'note', 'nothing found for this sensor - type the time, or use "pick on chart"'));
+  if (!jumps.length) jList.appendChild(mk('div', 'note', 'nothing found for this sensor - pick A and B yourself'));
   jumps.slice(0, 120).forEach(j => {
     const row = mk('div'); row.style.cssText = 'display:flex;gap:4px;align-items:stretch;margin:0 0 2px';
     const fill = mk('button', null, j.text); fill.type = 'button'; fill.style.cssText = 'flex:1;text-align:left;font:11px "IBM Plex Mono",monospace;padding:2px 4px;white-space:normal';
-    fill.onclick = () => { draft.t = fmtBkkLocal(j.t); draft.t2 = ''; draft.b = j.b; draft.mode = 'auto'; if (j.b != null) draft.hours = 1; reopen(); };
-    const join = mk('button', null, 'join'); join.type = 'button'; join.style.cssText = 'font:700 11px "IBM Plex Mono",monospace;padding:2px 8px'; join.title = 'move this sensor from this jump to the latest data so the line continues (auto)';
+    fill.onclick = () => { draft.a = fmtBkkLocal(j.tA); draft.bt = fmtBkkLocal(j.tB); if (draft.sensor !== '*') draft.sensor = j.nm; reopen(); };
+    const join = mk('button', null, 'join'); join.type = 'button'; join.style.cssText = 'font:700 11px "IBM Plex Mono",monospace;padding:2px 8px'; join.title = 'A and B around this jump, then shift everything after B so the line continues';
     join.onclick = () => {
-      const r = addShiftNow({ t: j.t, t2: null, b: j.b, channels: [j.nm], mode: 'auto', hours: j.hours, add: 0, snap: false });
+      const r = addShiftNow({ tA: j.tA, tB: j.tB, channels: [j.nm], hours: Math.max(1, Number(minIn.value) || 60) / 60 });
       draft.info = r.failed.length ? 'no usable data before and after that jump for ' + j.nm : r.info.join(' · ');
-      draft.t = ''; draft.t2 = '';
+      draft.a = ''; draft.bt = '';
       reopen();
     };
     row.append(fill, join); jList.appendChild(row);
@@ -4621,16 +4619,15 @@ function openShiftEditor(btn, u, spec, primaryNames, chOwner, badge){
   shiftPopover.appendChild(btnRow);
 
   applyBtn.onclick = () => {
-    syncDraft();
-    const t = parseBkkLocal(tIn.value), t2 = t2In.value ? parseBkkLocal(t2In.value) : null;
+    const tA = parseBkkLocal(aIn.value), tB = parseBkkLocal(bIn.value);
+    draft.minutes = Math.max(1, Number(minIn.value) || 60);
     const selected = draft.sensor === '*' ? primaryNames.slice() : [draft.sensor];
-    if (!isFinite(t)){ err.textContent = 'enter FROM: the time the level changed (start of the stretch to move)'; return; }
-    if (t2 != null && (!isFinite(t2) || t2 <= t)){ err.textContent = 'TO must be later than FROM (or leave it empty = until the latest data)'; return; }
+    if (!isFinite(tA) || !isFinite(tB)){ err.textContent = 'pick POINT A and POINT B (type the time or use "pick on chart")'; return; }
+    if (tB <= tA){ err.textContent = 'POINT B must be later than POINT A'; return; }
     if (!selected.length || !selected[0]){ err.textContent = 'choose a sensor'; return; }
-    const r = addShiftNow({ t, t2, b: draft.b, channels: selected, mode: draft.mode, hours: draft.hours, add: draft.add, snap: draft.snap !== false });
-    draft.b = null;
-    if (r.failed.length){ err.textContent = 'no usable data before and after FROM for: ' + r.failed.join(', '); return; }
-    draft.info = r.info.join(' · '); draft.t = ''; draft.t2 = '';
+    const r = addShiftNow({ tA, tB, channels: selected, hours: draft.minutes / 60 });
+    if (r.failed.length){ err.textContent = 'no usable data before A or after B for: ' + r.failed.join(', '); return; }
+    draft.info = r.info.join(' · '); draft.a = ''; draft.bt = '';
     openShiftEditor(btn, u, spec, primaryNames, chOwner, badge);
   };
   clearBtn.onclick = () => {
