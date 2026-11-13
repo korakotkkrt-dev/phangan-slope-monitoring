@@ -4944,7 +4944,7 @@ function makeChartNow(spec){
     measureBtn.title = 'toggle on, then zoom/pan to the time window you want measured (drag, 6h/24h, or double-click the axis) — the rate (K, degree/hr and degree/day) for every visible channel updates live for whatever window is on screen';
     measureRow.appendChild(measureBtn);
     drawLineBtn = document.createElement('button');
-    drawLineBtn.textContent = 'draw line';
+    drawLineBtn.textContent = 'draw & fit';
     drawLineBtn.title = 'toggle on, then DRAW a line along the data: press at the start, drag, release at the end (or click start, click end). You see your own stroke first, then it fits itself onto the data. The start SNAPS to the nearest real data sample (the series it snapped to is named next to the cursor); the line drawn is the least-squares line through ALL samples of that series between the two clicks, so its slope is the slope of the data over the whole stretch. The list below shows the series, the two snapped samples, slope, R² and the straight start→end slope, and lets you switch to another series.';
     measureRow.appendChild(drawLineBtn);
     wrap.appendChild(measureRow);
@@ -5311,7 +5311,7 @@ function makeChartNow(spec){
       drawArmed = !drawArmed;
       pendingPoint = null; drag = null;
       clearPreview();
-      drawLineBtn.textContent = drawArmed ? 'draw line: on' : 'draw line';
+      drawLineBtn.textContent = drawArmed ? 'draw & fit: on' : 'draw & fit';
       drawLineBtn.classList.toggle('on', drawArmed);
       u.over.style.cursor = drawArmed ? 'crosshair' : '';
     };
