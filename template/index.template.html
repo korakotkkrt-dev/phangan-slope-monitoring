@@ -3487,19 +3487,28 @@ function snapToData(u, spec, localX, localY){
     const k = idx + 1, s = u.series[k];
     if (!s || s.show === false) return;
     const dist = i => Math.hypot(pxOf(xs[i]) - localX, u.valToPos(u.data[k][i], 'y') - localY);
-    let bi = -1, bd = Infinity;
+    const segD = i => {                                                          // distance from the cursor to the curve piece between sample i and i+1
+      const j = Math.min(xs.length - 1, i + 1); if (j === i || !snapOk(u, spec, k, j)) return Infinity;
+      const ax = pxOf(xs[i]), ay = u.valToPos(u.data[k][i], 'y'), bx = pxOf(xs[j]), by = u.valToPos(u.data[k][j], 'y'), vx = bx - ax, vy = by - ay, L2 = vx * vx + vy * vy;
+      const t = L2 > 0 ? Math.max(0, Math.min(1, ((localX - ax) * vx + (localY - ay) * vy) / L2)) : 0;
+      return Math.hypot(ax + t * vx - localX, ay + t * vy - localY);
+    };
+    let bi = -1, bd = Infinity, sd = Infinity;
     for (let i = i0; i <= i1; i += stride){
       if (!snapOk(u, spec, k, i)) continue;
       const d = dist(i); if (d < bd){ bd = d; bi = i; }
+      const q = segD(i); if (q < sd) sd = q;
     }
     if (bi < 0) return;
     if (stride > 1){                       // refine around the coarse winner
       for (let i = Math.max(i0, bi - stride); i <= Math.min(i1, bi + stride); i++){
         if (!snapOk(u, spec, k, i)) continue;
         const d = dist(i); if (d < bd){ bd = d; bi = i; }
+        const q = segD(i); if (q < sd) sd = q;
       }
     }
-    if (!best || bd < best.d) best = { k, nm, i: bi, x: xs[bi], y: u.data[k][bi], d: bd };
+    const dn = Math.min(bd, sd);
+    if (!best || dn < best.d) best = { k, nm, i: bi, x: xs[bi], y: u.data[k][bi], d: dn };
   });
   return (best && best.d <= 70) ? best : null;
 }
@@ -3793,7 +3802,7 @@ function renderDrawLineList(chartId, listEl, onChange){
     box.appendChild(bar);
     const wrapT = document.createElement('div'); wrapT.style.cssText = 'max-height:300px;overflow:auto;border:1px solid var(--line);border-radius:4px;background:var(--panel)';
     const tb = document.createElement('table'); tb.style.cssText = 'border-collapse:collapse;width:100%;font:12px "IBM Plex Mono",monospace';
-    tb.innerHTML = '<thead><tr style="position:sticky;top:0;background:var(--panel-2);z-index:1"><th></th><th>#</th><th style="text-align:left">sensor</th><th>from</th><th>to</th><th>slope /day</th><th>R²</th></tr></thead>';
+    tb.innerHTML = '<thead><tr style="position:sticky;top:0;background:var(--panel-2);z-index:1"><th></th><th>#</th><th style="text-align:left">sensor</th><th>from</th><th>to</th><th>slope /day</th><th>R²</th><th title="delete this line"></th></tr></thead>';
     const tbody = document.createElement('tbody');
     const dd = t => new Date(t * 1e3).toLocaleDateString('en-GB', { timeZone: 'Asia/Bangkok', day: '2-digit', month: 'short', year: 'numeric' });
     const tk = c => { const m = /^tilt_(\d+)(?:_(\w+))?$/.exec(c || ''); return m ? [+m[1], m[2] || ''] : [999, c || '']; };
@@ -3803,7 +3812,7 @@ function renderDrawLineList(chartId, listEl, onChange){
       const on = mine.filter(l => !l.hide).length;
       const gh = document.createElement('tr'); gh.style.cssText = 'background:var(--panel-2);border-top:1px solid var(--line)';
       const col = SERIES_COLORS[chartId + '|' + g] || COLOR_DRAWLINE;
-      gh.innerHTML = '<td colspan="7" style="padding:2px 6px;font-weight:700;text-align:left"><span style="color:' + col + '">■</span> ' + escapeHtml(g) +
+      gh.innerHTML = '<td colspan="8" style="padding:2px 6px;font-weight:700;text-align:left"><span style="color:' + col + '">■</span> ' + escapeHtml(g) +
         ' <span style="font-weight:400;opacity:.7">· ' + mine.length + (mine.length === 1 ? ' line' : ' lines') + ' · ' + on + ' shown</span></td>';
       tbody.appendChild(gh);
       mine.forEach(l => {
@@ -3815,7 +3824,14 @@ function renderDrawLineList(chartId, listEl, onChange){
         c0.appendChild(cb); tr.appendChild(c0);
         const add = (html, st) => { const td = document.createElement('td'); td.style.cssText = 'padding:1px 6px;text-align:center;' + (st || ''); td.innerHTML = html; tr.appendChild(td); };
         add('#' + l.no, 'font-weight:700');
-        add(l.nm ? escapeHtml(l.nm) : 'hand-drawn', 'text-align:left');
+        if (l.fit && rec && spec){                                            // sensor = a menu: drew on the wrong series? pick another one here and the line refits
+          const td = document.createElement('td'); td.style.cssText = 'padding:1px 6px;text-align:left';
+          const sel = document.createElement('select'); sel.title = 'snapped to this series - choose another series to refit this line on it';
+          sel.style.cssText = 'font:12px "IBM Plex Mono",monospace;background:var(--panel-2);color:var(--ink);border:1px solid var(--line);border-radius:4px;padding:1px 3px;max-width:120px';
+          spec.primary.names.forEach((nm, idx) => { const sr = rec.u.series[idx + 1]; if (nm !== l.nm && (!sr || sr.show === false)) return; const o = document.createElement('option'); o.value = nm; o.textContent = nm; if (nm === l.nm) o.selected = true; sel.appendChild(o); });
+          sel.onchange = () => apply(() => { l.nm = sel.value; l.c = SERIES_COLORS[chartId + '|' + sel.value] || l.c; });
+          td.appendChild(sel); tr.appendChild(td);
+        } else add(l.nm ? escapeHtml(l.nm) : 'hand-drawn', 'text-align:left');
         ['w1', 'w2'].forEach(key => {
           const td = document.createElement('td'); td.style.cssText = 'padding:2px 4px;text-align:center';
           if (l.fit){
@@ -3833,13 +3849,17 @@ function renderDrawLineList(chartId, listEl, onChange){
         });
         add(f && isFinite(f.a) ? '<b style="color:' + deckSpeedClass(Math.abs(f.a)).c + '">' + (f.a < 0 ? '−' : '+') + Math.abs(f.a * 24).toFixed(Math.abs(f.a * 24) >= 0.01 ? 3 : 4) + '</b>' : '', '');
         add(f && f.r2 === f.r2 ? f.r2.toFixed(2) : '', '');
+        { const td = document.createElement('td'); td.style.cssText = 'text-align:center;padding:0 4px';
+          const x = document.createElement('button'); x.type = 'button'; x.textContent = '×'; x.title = 'delete this line'; x.style.cssText = 'font:700 14px sans-serif;line-height:1;padding:0 6px;cursor:pointer';
+          x.onclick = () => { drawLineStore[chartId] = (drawLineStore[chartId] || []).filter(q => q.id !== l.id); if (!drawLineStore[chartId].length) delete drawLineStore[chartId]; saveDrawLineStore(); onChange(); };
+          td.appendChild(x); tr.appendChild(td); }
         tbody.appendChild(tr);
       });
     });
     tb.appendChild(tbody); wrapT.appendChild(tb); box.appendChild(wrapT); listEl.appendChild(box); }
   // ---- per-line details (fold away when there are many lines)
-  const detBox = document.createElement('details'); detBox.open = lines.length <= 4;
-  { const sm = document.createElement('summary'); sm.className = 'n'; sm.style.cursor = 'pointer'; sm.textContent = 'details of each line (' + lines.length + ')'; detBox.appendChild(sm); }
+  const detBox = document.createElement('details'); detBox.open = false;
+  { const sm = document.createElement('summary'); sm.className = 'n'; sm.style.cursor = 'pointer'; sm.textContent = 'details of each line (' + lines.length + ') · R², snapped samples, straight start→end slope'; detBox.appendChild(sm); }
   let fitNo = 0;
   lines.forEach((ln, i) => {
     const row = document.createElement('div'); row.className = 'drawline-row'; row.dataset.id = ln.id; if (ln.hide) row.style.opacity = '.5';
@@ -3870,35 +3890,13 @@ function renderDrawLineList(chartId, listEl, onChange){
         fitNo++;
         body.innerHTML = '<span class="fit-tag" style="background:' + col + '">#' + (ln.no || fitNo) + '</span> <b>' + escapeHtml(ln.nm) + '</b> \u2014 <span class="n">not enough data in this window (series hidden, filtered out or missing)</span>';
       }
-      const sel = document.createElement('select');
-      sel.title = 'fit this stretch on another series';
-      sel.style.cssText = 'font:11px "IBM Plex Mono",monospace;background:var(--panel-2);color:var(--ink);border:1px solid var(--line);border-radius:4px;padding:2px 4px;margin-top:3px';
-      const o0 = document.createElement('option'); o0.textContent = 'fit another line…'; o0.value = ''; sel.appendChild(o0);
-      spec.primary.names.forEach((nm, idx) => {
-        const s = rec.u.series[idx + 1];
-        if (nm === ln.nm || !s || s.show === false) return;
-        const o = document.createElement('option'); o.value = nm; o.textContent = nm; sel.appendChild(o);
-      });
-      sel.onchange = () => {
-        if (!sel.value) return;
-        ln.nm = sel.value; ln.c = SERIES_COLORS[chartId + '|' + sel.value] || ln.c;
-        saveDrawLineStore(); onChange();
-      };
-      body.appendChild(document.createElement('br')); body.appendChild(sel);
     } else {
       const { dtH, K } = lineStats(ln.x1, ln.y1, ln.x2, ln.y2);
       const un = ln.u ? ln.u : 'degree';
       body.innerHTML = (ln.nm ? '<span style="color:' + ln.c + '">■</span> <b>' + escapeHtml(ln.nm) + ' trend</b>' : '<b>line ' + (i + 1) + '</b>') + ' — K ≈ ' +
         sign(K) + K.toFixed(4) + ' ' + un + '/hr  (' + sign(K * 24) + (K * 24).toFixed(3) + ' ' + un + '/day)  <span class="n">over ' + dtH.toFixed(2) + ' h (hand-drawn, not fitted)</span>';
     }
-    const del = document.createElement('button'); del.type = 'button'; del.title = 'delete this line'; del.textContent = '×';
-    del.onclick = () => {
-      drawLineStore[chartId] = (drawLineStore[chartId] || []).filter(l => l.id !== ln.id);
-      if (!drawLineStore[chartId].length) delete drawLineStore[chartId];
-      saveDrawLineStore();
-      onChange();
-    };
-    row.append(body, del);
+    row.append(body);
     detBox.appendChild(row);
   });
   listEl.appendChild(detBox);
