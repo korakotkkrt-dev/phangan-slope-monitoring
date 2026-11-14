@@ -83,14 +83,8 @@ function init(){
     b.innerHTML = cardHTML(m, d); b.onclick = () => { location.hash = m.id; };
     list.appendChild(b); cardBtns.push({ b, m, d });
   });
-  // live: time of the last sample and the rain tiles follow the minutes that arrive after the page was opened
-  if (typeof LIVE !== 'undefined') LIVE.on(() => cardBtns.forEach(c => {
-    const T = LIVE.tail[c.d.st.id]; if (!T || !T.xs.length) return;
-    const t = T.xs[T.xs.length - 1], rs = LIVE.rainStation(c.d.st), ageH = (Date.now() / 1000 - t) / 3600;
-    const d2 = Object.assign({}, c.d, { T: t, ageH, delayed: ageH > 24, when: new Date((t + 7 * 3600) * 1000).toISOString().slice(0, 16).replace('T', ' '),
-      rain24: dgRainWindow(rs, t - 86400, t), rain1: dgRainWindow(rs, t - 3600, t) });
-    c.b.innerHTML = cardHTML(c.m, d2);
-  }));
+  // live: every station card follows the data that arrives while the page is open (the status tiles are redrawn first by the chart refresh)
+  if (typeof LIVE !== 'undefined') LIVE.on(() => cardBtns.forEach(c => { const d2 = stationData(c.m); if (d2) c.b.innerHTML = cardHTML(c.m, d2); }));
   list.appendChild(el('div', 'hm-note',
     'ตำแหน่งบนแผนที่เป็นจุดกลางพื้นที่ติดตั้งโดยประมาณ ไม่ใช่พิกัดเซนเซอร์ · สถานะนับจากเกณฑ์เดิมของหน้าผังเซนเซอร์ ยังไม่ใช่การประเมินเชิงพื้นที่'));
 
