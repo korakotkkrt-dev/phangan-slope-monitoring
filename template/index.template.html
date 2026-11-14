@@ -5693,6 +5693,19 @@ function makeEnvelopeChart(spec){
   });
   wrap.appendChild(presetRow);
 
+  // scale: type the axis limits, or drag a box on the chart to zoom into it; blank / 'auto scale' / double-click = automatic again
+  let view = null;                       // null = automatic, else { x0, x1, y0, y1 }
+  const scaleRow = document.createElement('div');
+  scaleRow.className = 'view-toggle envelope-controls';
+  const mkSc = txt => { const l = document.createElement('label'); l.textContent = txt; const i = document.createElement('input'); i.type = 'number'; i.step = 'any'; i.style.width = '78px'; l.appendChild(i); scaleRow.appendChild(l); return i; };
+  const sx0 = mkSc('3-day from'), sx1 = mkSc('to'), sy0 = mkSc('daily from'), sy1 = mkSc('to');
+  const scSet = document.createElement('button'); scSet.textContent = 'set scale';
+  const scAuto = document.createElement('button'); scAuto.textContent = 'auto scale';
+  scaleRow.append(scSet, scAuto);
+  const scHint = document.createElement('span'); scHint.className = 'note'; scHint.style.cssText = 'font-size:10.5px;margin-left:6px'; scHint.textContent = 'or drag a box on the chart to zoom · double-click = auto';
+  scaleRow.appendChild(scHint);
+  wrap.appendChild(scaleRow);
+
   // set the AP-Model level 1 (watch) / level 2 (critical) rainfall criteria
   // directly on this chart — the same shared thresholds.rainDaily/rain3day
   // store the settings popup edits, so either place stays in sync with the
@@ -5758,17 +5771,34 @@ function makeEnvelopeChart(spec){
   const entry = { wrap, u: null, section: spec.section, hasSecondary: false, isEnvelope: true };
   envTools.appendChild(makePngButton(() => entry.u && entry.u.ctx.canvas, spec.id));
 
+  function syncScaleBoxes(){
+    const u = entry.u; if (!u) return;
+    const r = v => (Math.round(v * 10) / 10);
+    sx0.value = r(u.scales.x.min); sx1.value = r(u.scales.x.max); sy0.value = r(u.scales.y.min); sy1.value = r(u.scales.y.max);
+  }
+  function applyView(v){
+    if (v && !(v.x1 - v.x0 > 1e-6 && v.y1 - v.y0 > 1e-6)) return;
+    view = v;
+    if (entry.u){ entry.u.setData(entry.u.data, true); entry.u.redraw(false); syncScaleBoxes(); }
+  }
+  scSet.onclick = () => {
+    const a = parseFloat(sx0.value), b = parseFloat(sx1.value), c = parseFloat(sy0.value), d = parseFloat(sy1.value);
+    if (![a, b, c, d].every(isFinite) || b <= a || d <= c) return;
+    applyView({ x0: a, x1: b, y0: c, y1: d });
+  };
+  scAuto.onclick = () => applyView(null);
+  [sx0, sx1, sy0, sy1].forEach(i => i.addEventListener('keydown', e => { if (e.key === 'Enter') scSet.onclick(); }));
   function build(fromEpoch, toEpoch){
     const { xs, ys, ts, latestPt } = buildEnvelopePoints(days, totals, rolling3, fromEpoch, toEpoch);
-    curPts = { xs, ys, ts }; hoverIdx = -1; tip.style.display = 'none';
+    curPts = { xs, ys, ts }; hoverIdx = -1; tip.style.display = 'none'; view = null;
     if (entry.u) entry.u.destroy();
     entry.u = newUPlot({
       width: holder.clientWidth || 900,
       height: 320,
       cursor: { show: false }, // not a time series — no crosshair/nearest-point lookup needed
       scales: {
-        x: { time: false, range: (u, dMin, dMax) => [0, Math.max(dMax || 0, 545) * 1.12] },
-        y: { time: false, range: (u, dMin, dMax) => [0, Math.max(dMax || 0, 365) * 1.12] },
+        x: { time: false, range: (u, dMin, dMax) => view ? [view.x0, view.x1] : [0, Math.max(dMax || 0, 545) * 1.12] },
+        y: { time: false, range: (u, dMin, dMax) => view ? [view.y0, view.y1] : [0, Math.max(dMax || 0, 365) * 1.12] },
       },
       axes: [
         axisOpts('x', 2, { size: 40, label: '3-day cumulative rainfall (mm)' }),
@@ -5779,7 +5809,7 @@ function makeEnvelopeChart(spec){
         { label: 'rainfall path', stroke: dotColor, width: 1.5, points: { show: true, size: 5, fill: dotColor, stroke: dotColor } },
       ],
       legend: { show: false },
-      hooks: { draw: [ drawThresholdsHook(envelopeThresholds), drawLatestPointHook(() => latestPt), u => {
+      hooks: { draw: [ drawThresholdsHook(envelopeThresholds), drawLatestPointHook(() => latestPt), () => { if (![sx0, sx1, sy0, sy1].includes(document.activeElement)) syncScaleBoxes(); }, u => {
         // dates: first day of the range always labelled, hovered day ringed
         if (!curPts.xs.length) return;
         const { ctx } = u, dpr = devicePixelRatio || 1;
@@ -5824,6 +5854,31 @@ function makeEnvelopeChart(spec){
     over.addEventListener('mouseleave', () => { hoverIdx = -1; tip.style.display = 'none'; entry.u.redraw(false); });
     over.addEventListener('click', e => showTip(e.clientX, e.clientY));
     over.addEventListener('touchstart', e => { const t = e.touches[0]; if (t) showTip(t.clientX, t.clientY); }, { passive: true });
+    syncScaleBoxes();
+    // drag a box = zoom to it
+    const band = document.createElement('div'); band.style.cssText = 'position:absolute;display:none;border:1px dashed ' + dotColor + ';background:rgba(120,120,120,.15);pointer-events:none;z-index:4';
+    over.appendChild(band);
+    let drag = null;
+    over.addEventListener('mousedown', e => { if (e.button !== 0) return; const r = over.getBoundingClientRect(); drag = { x: e.clientX - r.left, y: e.clientY - r.top, moved: false }; });
+    window.addEventListener('mousemove', function mv(e){
+      if (!entry.u || entry.u.over !== over){ window.removeEventListener('mousemove', mv); return; }
+      if (!drag) return;
+      const r = over.getBoundingClientRect(), cx = Math.min(Math.max(e.clientX - r.left, 0), r.width), cy = Math.min(Math.max(e.clientY - r.top, 0), r.height);
+      if (Math.abs(cx - drag.x) > 5 || Math.abs(cy - drag.y) > 5) drag.moved = true;
+      if (!drag.moved) return;
+      band.style.display = 'block'; band.style.left = Math.min(drag.x, cx) + 'px'; band.style.top = Math.min(drag.y, cy) + 'px';
+      band.style.width = Math.abs(cx - drag.x) + 'px'; band.style.height = Math.abs(cy - drag.y) + 'px';
+    });
+    window.addEventListener('mouseup', function up(e){
+      if (!entry.u || entry.u.over !== over){ window.removeEventListener('mouseup', up); return; }
+      if (!drag) return;
+      const d = drag; drag = null; band.style.display = 'none';
+      if (!d.moved) return;
+      const r = over.getBoundingClientRect(), cx = Math.min(Math.max(e.clientX - r.left, 0), r.width), cy = Math.min(Math.max(e.clientY - r.top, 0), r.height);
+      const u = entry.u, xa = u.posToVal(d.x, 'x'), xb = u.posToVal(cx, 'x'), ya = u.posToVal(d.y, 'y'), yb = u.posToVal(cy, 'y');
+      applyView({ x0: Math.min(xa, xb), x1: Math.max(xa, xb), y0: Math.min(ya, yb), y1: Math.max(ya, yb) });
+    });
+    over.addEventListener('dblclick', () => applyView(null));
     caption.textContent = latestPt
       ? 'range ' + fmtDay(ts[0]) + ' → ' + fmtDay(latestPt.t) + ' (' + xs.length + ' days) · most recent in range: ' + fmtDate(latestPt.t) + ' — daily ' + latestPt.y.toFixed(1) + ' mm, 3-day cumulative ' + latestPt.x.toFixed(1) + ' mm · point at a dot to see its date'
       : 'no data in the selected range.';
