@@ -1155,6 +1155,160 @@ const STATIONS = [
   decodeStation(PAYLOAD_ST2, { id: 'st2', label: 'Station 02', stripe: COLOR_ACCENT2, noteChans: 30 }, EXTRA_ST2),
 ];
 
+// ==================== LIVE logger data ====================
+// The page is rebuilt once a day with the stored data. On top of that it asks the ThingsBoard public view (read-only, same source as the daily update)
+// for everything newer than the last stored sample:
+//   1. once, while loading, BEFORE any chart / card / analysis is made - so every sensor of both stations already contains the samples up to the last minute;
+//   2. then every minute while the page is open - the new minutes are kept in LIVE.tail (rain rate + latest value of every channel) and feed the
+//      rainfall envelope, the station cards and the live chip. The other charts are not touched in place; the chip offers 'reload' for them.
+// If ThingsBoard cannot be reached the page simply shows the stored data (the chip says so).
+const LIVE = (function(){
+  const HOST = 'https://thingsboard.sitearound.com', PUBLIC_ID = 'ba6ead80-6132-11f0-92c5-81d8b0125e9b';
+  const DEV = { st1: '7273b210-6860-11f1-801f-81d8b0125e9b', st2: '1a2a2790-6862-11f1-801f-81d8b0125e9b' };
+  const T0 = 1787623200;                                     // 2026-08-25 09:00 ICT, minute 0 of the stored grid
+  const scaleOf = {};
+  [['st1', EXTRA_ST1], ['st2', EXTRA_ST2]].forEach(([id, ex]) => { scaleOf[id] = {}; ((ex && ex.series) || []).forEach(s => { scaleOf[id][s.name] = s.scale; }); });
+  const L = { ok: false, err: '', bootAt: 0, bootAdded: {}, bootLast: {}, checkedAt: 0, lastSample: 0, newMin: 0, tail: {}, listeners: [], busy: false, token: null };
+
+  const keysOf = st => Object.keys(st.CH).filter(nm => scaleOf[st.id][nm]);
+  const path = (st, keys, a, b) => '/api/plugins/telemetry/DEVICE/' + DEV[st.id] + '/values/timeseries?' +
+    new URLSearchParams({ keys: keys.join(','), startTs: Math.round(a), endTs: Math.round(b), limit: 100000, agg: 'NONE', orderBy: 'ASC' });
+
+  // ---- one request, blocking (page start) or not (every minute)
+  function xhr(method, p, body, token){
+    const x = new XMLHttpRequest();
+    x.open(method, HOST + p, false);
+    x.setRequestHeader('Content-Type', 'application/json');
+    if (token) x.setRequestHeader('X-Authorization', 'Bearer ' + token);
+    x.send(body ? JSON.stringify(body) : null);
+    if (x.status < 200 || x.status >= 300) throw new Error('HTTP ' + x.status);
+    return JSON.parse(x.responseText);
+  }
+  async function afetch(method, p, body, token){
+    const r = await fetch(HOST + p, { method, headers: Object.assign({ 'Content-Type': 'application/json' }, token ? { 'X-Authorization': 'Bearer ' + token } : {}), body: body ? JSON.stringify(body) : undefined });
+    if (!r.ok){ const e = new Error('HTTP ' + r.status); e.status = r.status; throw e; }
+    return r.json();
+  }
+
+  // ---- put raw samples {name: [{ts, value}]} on the stored minute grid (value rounded to the channel's stored precision, like the daily build does)
+  function toRows(st, raw, minMin){
+    const sc = scaleOf[st.id], rows = new Map();
+    for (const nm in raw){
+      if (!sc[nm]) continue;
+      for (const p of raw[nm]){
+        const v = Number(p.value); if (!isFinite(v)) continue;
+        const m = Math.round((p.ts / 1000 - T0) / 60); if (m < minMin) continue;
+        let r = rows.get(m); if (!r){ r = {}; rows.set(m, r); }
+        r[nm] = Math.round(v / sc[nm]) * sc[nm];
+      }
+    }
+    return rows;
+  }
+  // boot: extend the station's arrays (new, longer arrays - nothing else has seen the old ones yet)
+  function mergeBoot(st, raw){
+    const n0 = st.n, lastM = Math.round((st.xs[n0 - 1] - T0) / 60);
+    const rows = toRows(st, raw, lastM - 120);
+    let maxM = lastM; rows.forEach((r, m) => { if (m > maxM) maxM = m; });
+    // late samples inside the last 2 hours: only cells that are still empty are filled
+    let filled = 0;
+    for (let i = n0 - 1; i >= 0 && st.xs[i] > T0 + 60 * (lastM - 120); i--){
+      const r = rows.get(Math.round((st.xs[i] - T0) / 60)); if (!r) continue;
+      for (const nm in r) if (isNaN(st.CH[nm][i])){ st.CH[nm][i] = r[nm]; filled++; }
+    }
+    const add = maxM - lastM;
+    if (add > 0){
+      const n1 = n0 + add, xs = new Float64Array(n1); xs.set(st.xs);
+      for (let k = 0; k < add; k++) xs[n0 + k] = T0 + 60 * (lastM + 1 + k);
+      const CH = {};
+      for (const nm of Object.keys(st.CH)){ const a = new Float64Array(n1); a.set(st.CH[nm]); a.fill(NaN, n0); CH[nm] = a; }
+      rows.forEach((r, m) => { if (m <= lastM) return; for (const nm in r) CH[nm][n0 + (m - lastM - 1)] = r[nm]; });
+      st.xs = xs; st.CH = CH; st.n = n1;
+    }
+    return add + filled;
+  }
+
+  // ---- blocking fill at page start
+  function boot(){
+    STATIONS.forEach(st => { L.bootLast[st.id] = st.xs[st.n - 1]; });
+    L.lastSample = Math.max.apply(null, STATIONS.map(st => L.bootLast[st.id]));
+    try {
+      let brk = 0; try { brk = Number(localStorage.getItem('phg_live_fail') || 0); } catch (e) {}
+      if (Date.now() - brk < 5 * 60e3){ L.err = 'ThingsBoard did not answer a minute ago - stored data only (retrying in a few minutes)'; return; }
+      const tok = xhr('POST', '/api/auth/login/public', { publicId: PUBLIC_ID }).token;
+      L.token = tok;
+      STATIONS.forEach(st => {
+        const keys = keysOf(st), end = Date.now() + 120e3;
+        let start = Math.max((st.xs[st.n - 1] - 1800) * 1000, end - 31 * 86400e3);
+        const raw = {}; keys.forEach(k => { raw[k] = []; });
+        for (let a = start; a < end; a += 7 * 86400e3){
+          const r = xhr('GET', path(st, keys, a, Math.min(a + 7 * 86400e3 - 1, end)), null, tok);
+          for (const k in r) if (raw[k]) Array.prototype.push.apply(raw[k], r[k]);
+        }
+        L.bootAdded[st.id] = mergeBoot(st, raw);
+        L.bootLast[st.id] = st.xs[st.n - 1];
+      });
+      L.ok = true; L.bootAt = Date.now();
+      try { localStorage.removeItem('phg_live_fail'); } catch (e) {}
+    } catch (e) {
+      L.err = 'live feed unavailable (' + (e && e.message || e) + ') - stored data only';
+      try { localStorage.setItem('phg_live_fail', String(Date.now())); } catch (e2) {}
+    }
+    L.lastSample = Math.max.apply(null, STATIONS.map(st => L.bootLast[st.id]));
+  }
+
+  // ---- every minute: newest minutes, kept apart from the arrays the charts already use
+  function tailOf(st){ return L.tail[st.id] || (L.tail[st.id] = { byMin: new Map(), xs: [], rate: [], latest: {} }); }
+  async function tick(){
+    if (L.busy) return; L.busy = true;
+    try {
+      if (!L.token) L.token = (await afetch('POST', '/api/auth/login/public', { publicId: PUBLIC_ID })).token;
+      let any = false;
+      for (const st of STATIONS){
+        const T = tailOf(st), keys = keysOf(st);
+        const known = Math.max(L.bootLast[st.id] || 0, T.xs.length ? T.xs[T.xs.length - 1] : 0);
+        const a = Math.max((known - 600) * 1000, Date.now() - 31 * 86400e3);
+        let r;
+        try { r = await afetch('GET', path(st, keys, a, Date.now() + 120e3), null, L.token); }
+        catch (e) { if (e.status === 401){ L.token = (await afetch('POST', '/api/auth/login/public', { publicId: PUBLIC_ID })).token; r = await afetch('GET', path(st, keys, a, Date.now() + 120e3), null, L.token); } else throw e; }
+        const rows = toRows(st, r, Math.round((L.bootLast[st.id] - T0) / 60) + 1);
+        rows.forEach((row, m) => { const o = T.byMin.get(m) || {}; Object.assign(o, row); T.byMin.set(m, o); });
+        const ms = Array.from(T.byMin.keys()).sort((p, q) => p - q);
+        const nx = [], nr = [];
+        ms.forEach(m => { const row = T.byMin.get(m); nx.push(T0 + 60 * m); nr.push(row.rainfall_rate != null ? row.rainfall_rate : NaN); for (const nm in row) T.latest[nm] = { t: T0 + 60 * m, v: row[nm] }; });
+        if (nx.length !== T.xs.length) any = true;
+        T.xs = nx; T.rate = nr;
+        if (nx.length) L.lastSample = Math.max(L.lastSample, nx[nx.length - 1]);
+      }
+      L.ok = true; L.err = ''; L.checkedAt = Date.now();
+      try { localStorage.removeItem('phg_live_fail'); } catch (e) {}
+      L.newMin = Math.max.apply(null, STATIONS.map(st => tailOf(st).xs.length));
+      if (any) L.listeners.forEach(f => { try { f(); } catch (e) { console.error(e); } });
+      L.chip();
+    } catch (e) {
+      L.err = 'live feed unavailable (' + (e && e.message || e) + ')'; L.chip();
+    } finally { L.busy = false; }
+  }
+
+  // station as the rain functions want it: stored minutes + the newest minutes
+  L.rainStation = function(st){
+    const T = L.tail[st.id]; if (!T || !T.xs.length) return st;
+    const n0 = st.xs.length, n = n0 + T.xs.length, xs = new Float64Array(n), r = new Float64Array(n);
+    xs.set(st.xs); r.set(st.CH.rainfall_rate);
+    for (let i = 0; i < T.xs.length; i++){ xs[n0 + i] = T.xs[i]; r[n0 + i] = T.rate[i]; }
+    return { id: st.id, xs, n, CH: { rainfall_rate: r } };
+  };
+  L.on = f => { L.listeners.push(f); };
+  L.start = function(){
+    tick();
+    setInterval(() => { if (document.visibilityState !== 'hidden') tick(); }, 60e3);
+    document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible' && Date.now() - L.checkedAt > 45e3) tick(); });
+  };
+  L.boot = function(){ try { boot(); } catch (e) { L.err = 'live feed unavailable (' + e + ')'; } };
+  L.chip = function(){};                                        // replaced once the page header exists
+  return L;
+})();
+LIVE.boot();
+
 function group(st, gid){
   const g = st.groups.find(g => g[0] === gid);
   return g ? g[2].filter(nm => st.CH[nm]) : [];
@@ -1180,6 +1334,35 @@ function fmtAgo(t){
 document.getElementById('meta-line').textContent =
   fmtDate(globalMin) + ' → ' + fmtDate(globalMax) + '  ·  2 stations, viewed one at a time (' +
   STATIONS.map(s => s.noteChans + ' ch.').join(' + ') + ')  ·  1-minute resolution, nothing downsampled';
+
+// live chip under the header line: when each station last reported, when the page last asked, and a reload button for the charts that are not updated in place
+(function(){ try {
+  const ml = document.getElementById('meta-line'); if (!ml) return;
+  const chip = document.createElement('div'); chip.id = 'live-chip';
+  chip.style.cssText = 'font:11px "IBM Plex Mono",monospace;margin-top:5px;display:flex;flex-wrap:wrap;gap:4px 12px;align-items:center;color:var(--ink-3)';
+  ml.insertAdjacentElement('afterend', chip);
+  const hm = t => new Date((t + 7 * 3600) * 1000).toISOString().slice(11, 16);
+  const dm = t => new Date((t + 7 * 3600) * 1000).toISOString().slice(8, 10) + '/' + new Date((t + 7 * 3600) * 1000).toISOString().slice(5, 7);
+  LIVE.chip = function(){
+    chip.innerHTML = '';
+    const mk = (txt, css) => { const e = document.createElement('span'); e.textContent = txt; if (css) e.style.cssText = css; chip.appendChild(e); return e; };
+    const live = LIVE.ok && !LIVE.err;
+    mk(live ? '\u25cf LIVE' : '\u25cb stored data only', 'font-weight:700;color:' + (live ? '#2e9d5b' : 'var(--warn)'));
+    STATIONS.forEach(st => {
+      const T = LIVE.tail[st.id], t = T && T.xs.length ? T.xs[T.xs.length - 1] : LIVE.bootLast[st.id];
+      const ageMin = (Date.now() / 1e3 - t) / 60;
+      mk(st.label.replace('Station ', 'St') + ' last sample ' + dm(t) + ' ' + hm(t) + ' ICT' + (ageMin > 30 ? ' (' + (ageMin < 120 ? Math.round(ageMin) + ' min' : ageMin < 2880 ? (ageMin / 60).toFixed(1) + ' h' : (ageMin / 1440).toFixed(1) + ' d') + ' ago)' : ''));
+    });
+    if (LIVE.checkedAt) mk('checked ' + new Date(LIVE.checkedAt + 7 * 3600e3).toISOString().slice(11, 19) + ' ICT, every minute');
+    if (LIVE.err) mk(LIVE.err, 'color:var(--warn)');
+    if (LIVE.newMin > 0){
+      mk('+' + LIVE.newMin + ' new min since the page opened: envelope and station cards follow live');
+      const b = document.createElement('button'); b.textContent = 'reload to update every chart'; b.style.cssText = 'font:11px "IBM Plex Mono",monospace;padding:1px 8px'; b.onclick = () => location.reload(); chip.appendChild(b);
+    }
+  };
+  LIVE.chip();
+  setTimeout(() => LIVE.start(), 800);
+} catch (e) { console.error('live chip', e); } })();
 
 // ---- nearest-neighbour resample of a foreign station's series onto a target xs grid
 function resampleNearest(srcXs, srcVals, dstXs, tolSec){
@@ -5624,22 +5807,35 @@ function drawLatestPointHook(getPt){
 // connecting line traces the actual day-to-day trajectory across the
 // (3-day cumulative, daily) plane, the way a storm event's path is drawn
 // across this kind of criteria plot.
-function buildEnvelopePoints(days, totals, rolling3, fromEpoch, toEpoch){
-  const pts = [];
+// A DOT is a finished Asia/Bangkok calendar day (00:00 - 24:00 ICT, the same day cut as before). Today is not finished: it is drawn as a live trace -
+// from where the 3-day sum stands at midnight (the two days before, daily = 0) rising with today's rain so far - and its newest point is the red circle.
+function buildEnvelopePoints(days, totals, rolling3, fromEpoch, toEpoch, todayStart, lastSampleT){
+  const pts = [], tot = new Map();
+  for (let i = 0; i < days.length; i++) tot.set(days[i], totals[i]);
   for (let i = 0; i < days.length; i++){
-    if (days[i] < fromEpoch || days[i] > toEpoch) continue;
+    if (days[i] < fromEpoch || days[i] > toEpoch || days[i] >= todayStart) continue;
     if (isNaN(totals[i]) || isNaN(rolling3[i])) continue;
     pts.push({ t: days[i], x: rolling3[i], y: totals[i] });
   }
-  if (!pts.length) return { xs: [], ys: [], ts: [], latestPt: null };
   pts.sort((a, b) => a.t - b.t);
-  return { xs: pts.map(p => p.x), ys: pts.map(p => p.y), ts: pts.map(p => p.t), latestPt: pts[pts.length - 1] };
+  let live = null;
+  if (lastSampleT >= todayStart && todayStart >= fromEpoch && todayStart <= toEpoch){
+    const y = tot.get(todayStart) || 0, before = (tot.get(todayStart - 86400) || 0) + (tot.get(todayStart - 2 * 86400) || 0);
+    live = { x0: before, x: before + y, y, t: lastSampleT, live: true };
+  }
+  const base = { xs: pts.map(p => p.x), ys: pts.map(p => p.y), ts: pts.map(p => p.t), live };
+  base.latestPt = live || (pts.length ? pts[pts.length - 1] : null);
+  return base;
 }
 function makeEnvelopeChart(spec){
   const st = spec.chOwner;
-  const { days, totals } = computeDailyTotals(st);
+  // stored minutes + the minutes that arrived after the page was opened (LIVE.tail)
+  let days, totals, rolling3;
+  const recompute = () => { const r = computeDailyTotals(LIVE.rainStation(st)); days = r.days; totals = r.totals; rolling3 = computeRolling3Day(days, totals); };
+  recompute();
   if (!days.length) return null;
-  const rolling3 = computeRolling3Day(days, totals);
+  const bkkMidnight = t => Math.floor((t + 7 * 3600) / 86400) * 86400 - 7 * 3600;
+  const lastSampleOf = () => { const rs = LIVE.rainStation(st); return rs.xs[rs.xs.length - 1]; };
 
   const wrap = document.createElement('div');
   wrap.className = 'chart';
@@ -5657,7 +5853,7 @@ function makeEnvelopeChart(spec){
   const note = document.createElement('div');
   note.className = 'note';
   note.style.margin = '0 0 6px';
-  note.textContent = 'each point is one Asia/Bangkok calendar day — x = trailing 3-day cumulative rainfall, y = that day’s total (same sums as the Rainfall chart’s daily/3-day-total tabs), connected in date order so the line traces the actual rainfall trajectory across the plane. Dashed diagonals are the AP-Model Level 1/2 boundary lines from the site’s reference figure (see the legend below for the current mm values — editable from the Sensor Readings page) — a point above/right of a line is past that level. The most recent day within the selected range is the red point.';
+  note.textContent = 'each point is one Asia/Bangkok calendar day — x = trailing 3-day cumulative rainfall, y = that day’s total (same sums as the Rainfall chart’s daily/3-day-total tabs), connected in date order so the line traces the actual rainfall trajectory across the plane. Dashed diagonals are the AP-Model Level 1/2 boundary lines from the site’s reference figure (see the legend below for the current mm values — editable from the Sensor Readings page) — a point above/right of a line is past that level. A dot is a finished day (00:00–24:00 ICT); today is a dashed live trace that follows the logger every minute, and its newest value is the red circle.';
   wrap.appendChild(note);
 
   const ctrlRow = document.createElement('div');
@@ -5744,8 +5940,9 @@ function makeEnvelopeChart(spec){
   const dotColor = st.stripe;
   const legend = document.createElement('div');
   legend.className = 'legend';
-  legend.innerHTML = '<label><i style="background:' + dotColor + '"></i> rainfall path (oldest → newest)</label>' +
-    '<label><i style="background:' + COLOR_CRIT + '"></i> most recent in range</label>';
+  legend.innerHTML = '<label><i style="background:' + dotColor + '"></i> one dot = one finished day (00:00–24:00 ICT), joined oldest → newest</label>' +
+    '<label><i style="background:repeating-linear-gradient(90deg,' + dotColor + ' 0 4px,transparent 4px 7px)"></i> today so far (live)</label>' +
+    '<label><i style="background:' + COLOR_CRIT + '"></i> latest value (red circle, updates every minute)</label>';
   wrap.appendChild(legend);
   const envThreshLegend = buildThresholdLegend(envelopeThresholds);
   if (envThreshLegend) wrap.appendChild(envThreshLegend);
@@ -5765,7 +5962,8 @@ function makeEnvelopeChart(spec){
   tip.className = 'env-tip';
   tip.style.cssText = 'position:absolute;display:none;pointer-events:none;z-index:5;background:var(--panel,#fff);color:var(--ink,#141413);border:1px solid var(--line,#999);border-radius:6px;padding:5px 8px;font:11px "IBM Plex Mono",monospace;line-height:1.5;box-shadow:0 2px 8px rgba(0,0,0,.25);white-space:nowrap';
   holder.appendChild(tip);
-  let hoverIdx = -1, curPts = { xs: [], ys: [], ts: [] };
+  let hoverIdx = -1, curPts = { xs: [], ys: [], ts: [], nc: 0 }, curLive = null;
+  let xTop = 545, yTop = 365;
   const fmtDay = t => new Date((t + 7 * 3600) * 1000).toLocaleDateString('en-GB', { timeZone: 'UTC', weekday: 'short', day: '2-digit', month: 'short', year: 'numeric' });
   const levelOf = (v, w, c) => (c != null && v >= c) ? ' \u2265 critical' : (w != null && v >= w) ? ' \u2265 watch' : '';
   const entry = { wrap, u: null, section: spec.section, hasSecondary: false, isEnvelope: true };
@@ -5788,17 +5986,24 @@ function makeEnvelopeChart(spec){
   };
   scAuto.onclick = () => applyView(null);
   [sx0, sx1, sy0, sy1].forEach(i => i.addEventListener('keydown', e => { if (e.key === 'Enter') scSet.onclick(); }));
-  function build(fromEpoch, toEpoch){
-    const { xs, ys, ts, latestPt } = buildEnvelopePoints(days, totals, rolling3, fromEpoch, toEpoch);
-    curPts = { xs, ys, ts }; hoverIdx = -1; tip.style.display = 'none'; view = null;
+  function build(fromEpoch, toEpoch, keepView){
+    const lastT = lastSampleOf();
+    const { xs, ys, ts, live, latestPt } = buildEnvelopePoints(days, totals, rolling3, fromEpoch, toEpoch, bkkMidnight(Date.now() / 1000), lastT);
+    const nc = xs.length;
+    curLive = live;
+    curPts = { xs: xs.concat(live ? [live.x] : []), ys: ys.concat(live ? [live.y] : []), ts: ts.concat(live ? [live.t] : []), nc };
+    hoverIdx = -1; tip.style.display = 'none'; if (!keepView) view = null;
+    const X = xs.slice(), Y1 = ys.slice(), Y2 = xs.map(() => null);
+    if (live){ X.push(live.x0, live.x); Y1.push(null, null); Y2.push(0, live.y); if (nc) Y2[nc - 1] = ys[nc - 1]; }
+    xTop = Math.max(545, ...X); yTop = Math.max(365, ...ys, live ? live.y : 0);
     if (entry.u) entry.u.destroy();
     entry.u = newUPlot({
       width: holder.clientWidth || 900,
       height: 320,
       cursor: { show: false }, // not a time series — no crosshair/nearest-point lookup needed
       scales: {
-        x: { time: false, range: (u, dMin, dMax) => view ? [view.x0, view.x1] : [0, Math.max(dMax || 0, 545) * 1.12] },
-        y: { time: false, range: (u, dMin, dMax) => view ? [view.y0, view.y1] : [0, Math.max(dMax || 0, 365) * 1.12] },
+        x: { time: false, range: () => view ? [view.x0, view.x1] : [0, xTop * 1.12] },
+        y: { time: false, range: () => view ? [view.y0, view.y1] : [0, yTop * 1.12] },
       },
       axes: [
         axisOpts('x', 2, { size: 40, label: '3-day cumulative rainfall (mm)' }),
@@ -5806,7 +6011,8 @@ function makeEnvelopeChart(spec){
       ],
       series: [
         {},
-        { label: 'rainfall path', stroke: dotColor, width: 1.5, points: { show: true, size: 5, fill: dotColor, stroke: dotColor } },
+        { label: 'finished days', stroke: dotColor, width: 1.5, points: { show: true, size: 5, fill: dotColor, stroke: dotColor } },
+        { label: 'today so far (live)', stroke: dotColor, width: 1.5, dash: [5, 4], points: { show: false } },
       ],
       legend: { show: false },
       hooks: { draw: [ drawThresholdsHook(envelopeThresholds), drawLatestPointHook(() => latestPt), () => { if (![sx0, sx1, sy0, sy1].includes(document.activeElement)) syncScaleBoxes(); }, u => {
@@ -5817,7 +6023,11 @@ function makeEnvelopeChart(spec){
         ctx.beginPath(); ctx.rect(u.bbox.left, u.bbox.top, u.bbox.width, u.bbox.height); ctx.clip();
         ctx.font = (10 * dpr) + 'px "IBM Plex Mono", monospace'; ctx.textBaseline = 'bottom'; ctx.fillStyle = COLOR_INK || '#141413';
         const lab = (i, dx, dy) => { const px = u.valToPos(curPts.xs[i], 'x', true), py = u.valToPos(curPts.ys[i], 'y', true); ctx.fillText(fmtShort(curPts.ts[i]).replace(/,? \d\d:\d\d$/, ''), px + dx * dpr, py + dy * dpr); };
-        lab(0, 6, -6);
+        if (curPts.nc) lab(0, 6, -6);
+        if (curLive){
+          const px = u.valToPos(curLive.x, 'x', true), py = u.valToPos(curLive.y, 'y', true);
+          ctx.fillStyle = COLOR_CRIT; ctx.fillText('live ' + new Date((curLive.t + 7 * 3600) * 1000).toISOString().slice(11, 16), px + 11 * dpr, py - 8 * dpr);
+        }
         if (hoverIdx >= 0){
           const px = u.valToPos(curPts.xs[hoverIdx], 'x', true), py = u.valToPos(curPts.ys[hoverIdx], 'y', true);
           ctx.lineWidth = 2 * dpr; ctx.strokeStyle = dotColor; ctx.fillStyle = COLOR_PANEL;
@@ -5826,7 +6036,7 @@ function makeEnvelopeChart(spec){
         }
         ctx.restore();
       } ] },
-    }, [xs, ys], holder);
+    }, [X, Y1, Y2], holder);
     // hover / tap: nearest day within 18 px tells its date and both rainfall values
     const over = entry.u.over;
     const showTip = (cx, cy) => {
@@ -5841,8 +6051,8 @@ function makeEnvelopeChart(spec){
       if (bi < 0){ tip.style.display = 'none'; over.style.cursor = ''; return; }
       over.style.cursor = 'pointer';
       const dy = curPts.ys[bi], d3 = curPts.xs[bi];
-      tip.innerHTML = '<b>' + fmtDay(curPts.ts[bi]) + '</b><br>daily ' + dy.toFixed(1) + ' mm' + levelOf(dy, thresholds.rainDaily.warn, thresholds.rainDaily.crit) +
-        '<br>3-day ' + d3.toFixed(1) + ' mm' + levelOf(d3, thresholds.rain3day.warn, thresholds.rain3day.crit) + '<br><span style="opacity:.65">day ' + (bi + 1) + ' of ' + curPts.xs.length + ' in range</span>';
+      tip.innerHTML = (bi >= curPts.nc ? '<b>Today so far · live</b><br><span style="opacity:.65">logger sample ' + fmtDate(curPts.ts[bi]) + '</span><br>' : '<b>' + fmtDay(curPts.ts[bi]) + '</b><br>') + 'daily ' + dy.toFixed(1) + ' mm' + levelOf(dy, thresholds.rainDaily.warn, thresholds.rainDaily.crit) +
+        '<br>3-day ' + d3.toFixed(1) + ' mm' + levelOf(d3, thresholds.rain3day.warn, thresholds.rain3day.crit) + (bi >= curPts.nc ? '<br><span style="opacity:.65">not finished - the red circle moves with every new sample</span>' : '<br><span style="opacity:.65">finished day ' + (bi + 1) + ' of ' + curPts.nc + ' in range</span>');
       tip.style.display = 'block';
       const hr = holder.getBoundingClientRect();
       let tx = cx - hr.left + 14, ty = cy - hr.top - 12;
@@ -5880,7 +6090,7 @@ function makeEnvelopeChart(spec){
     });
     over.addEventListener('dblclick', () => applyView(null));
     caption.textContent = latestPt
-      ? 'range ' + fmtDay(ts[0]) + ' → ' + fmtDay(latestPt.t) + ' (' + xs.length + ' days) · most recent in range: ' + fmtDate(latestPt.t) + ' — daily ' + latestPt.y.toFixed(1) + ' mm, 3-day cumulative ' + latestPt.x.toFixed(1) + ' mm · point at a dot to see its date'
+      ? (nc ? 'range ' + fmtDay(ts[0]) + ' → ' + fmtDay(ts[nc - 1]) + ' (' + nc + ' finished days)' : 'no finished day in this range') + ' · latest value' + (live ? ' (today so far, last logger sample ' : ' (' ) + fmtDate(latestPt.t) + '): daily ' + latestPt.y.toFixed(1) + ' mm, 3-day cumulative ' + latestPt.x.toFixed(1) + ' mm · point at a dot to see its date'
       : 'no data in the selected range.';
   }
   build(days[0], days[days.length - 1] + 86400 - 1);
@@ -5892,6 +6102,19 @@ function makeEnvelopeChart(spec){
     if (!isFinite(f) || !isFinite(t) || f > t) return;
     build(f, t);
   };
+  // every minute the logger reports: recompute the days (stored + new minutes), extend the range if it was ending on the latest day, redraw keeping the zoom
+  entry.refresh = () => {
+    const oldLast = bkkDateStr(days[days.length - 1]);
+    recompute();
+    const newLast = bkkDateStr(days[days.length - 1]);
+    fromInput.max = toInput.max = newLast;
+    if (toInput.value === oldLast) toInput.value = newLast;
+    const f = bkkDateStrToEpoch(fromInput.value, false), t = bkkDateStrToEpoch(toInput.value, true);
+    if (!isFinite(f) || !isFinite(t) || f > t) return;
+    build(f, t, true);
+    const nEl = h.querySelector('.n'); if (nEl) nEl.textContent = days.length + ' days';
+  };
+  LIVE.on(() => entry.refresh());
   fromInput.onchange = toInput.onchange = () => { presetBtns.forEach(x => x.classList.remove('on')); applyBtn.onclick(); };
   resetBtn.onclick = () => {
     presetBtns.forEach(x => x.classList.toggle('on', x.dataset.n === '0'));
@@ -8952,11 +9175,20 @@ function init(){
 
   const list = document.getElementById('hm-list');
   const data = HOME_STATIONS.map(m => ({ m, d: stationData(m) })).filter(x => x.d);
+  const cardBtns = [];
   data.forEach(({ m, d }) => {
     const b = el('button', 'hm-st'); b.type = 'button';
     b.innerHTML = cardHTML(m, d); b.onclick = () => { location.hash = m.id; };
-    list.appendChild(b);
+    list.appendChild(b); cardBtns.push({ b, m, d });
   });
+  // live: time of the last sample and the rain tiles follow the minutes that arrive after the page was opened
+  if (typeof LIVE !== 'undefined') LIVE.on(() => cardBtns.forEach(c => {
+    const T = LIVE.tail[c.d.st.id]; if (!T || !T.xs.length) return;
+    const t = T.xs[T.xs.length - 1], rs = LIVE.rainStation(c.d.st), ageH = (Date.now() / 1000 - t) / 3600;
+    const d2 = Object.assign({}, c.d, { T: t, ageH, delayed: ageH > 24, when: new Date((t + 7 * 3600) * 1000).toISOString().slice(0, 16).replace('T', ' '),
+      rain24: dgRainWindow(rs, t - 86400, t), rain1: dgRainWindow(rs, t - 3600, t) });
+    c.b.innerHTML = cardHTML(c.m, d2);
+  }));
   list.appendChild(el('div', 'hm-note',
     'ตำแหน่งบนแผนที่เป็นจุดกลางพื้นที่ติดตั้งโดยประมาณ ไม่ใช่พิกัดเซนเซอร์ · สถานะนับจากเกณฑ์เดิมของหน้าผังเซนเซอร์ ยังไม่ใช่การประเมินเชิงพื้นที่'));
 
