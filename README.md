@@ -14,9 +14,11 @@ trend lines, splice / filter tools and a phone-friendly layout.
 
 ## Live data (no waiting for the daily update)
 When the page opens it asks the ThingsBoard public view (read-only) for every sample newer than the stored data and adds it to both stations **before** any chart is made,
-so every chart / card / analysis already runs up to the last logger minute. While the page stays open it asks again every minute: the **rainfall envelope**
-(dot = one finished Bangkok day, dashed live trace for today, red circle = latest value) and the station cards follow live; the chip under the title shows the last
-sample of each station and a button to reload the other charts. If ThingsBoard cannot be reached the page shows the stored data (the chip says so).
+so every chart / card / analysis already runs up to the last logger minute. While the page stays open it asks again every minute: the new minutes are appended to the
+station arrays, tilt rate and sensor-fault flags are recomputed, and the **rainfall envelope** (dot = one finished Bangkok day, dashed live trace for today, red circle = latest value),
+the **time-series charts**, the **status tiles** and the **station cards** redraw by themselves (zoom, hidden lines and the rainfall axis are kept; a chart you are using, or one that is not on
+screen, is rebuilt a few seconds later). The chip under the title shows the last sample of each station. Only the Analysis tab, the Compare chart and the Data table need a reload.
+If ThingsBoard cannot be reached the page shows the stored data (the chip says so).
 
 ## Shared settings and field notes
 Splices, value filters, pinned lines, thresholds, sensor marks and **field notes** are stored in the browser. To use the same ones on every device,
