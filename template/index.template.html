@@ -4640,14 +4640,15 @@ function openFilterEditor(btn, u, spec, chOwner, primaryNames, filterBadge){
 }
 
 function openShiftEditor(btn, u, spec, primaryNames, chOwner, badge){
-  const draft = spliceDraft[spec.id] = spliceDraft[spec.id] || { channels: [], sensor: '', a: '', bt: '', minutes: 60, info: '' };
+  const draft = spliceDraft[spec.id] = spliceDraft[spec.id] || { channels: [], sensor: '', sel: null, a: '', bt: '', t2: '', minutes: 60, info: '' };
+  if (draft.t2 == null) draft.t2 = '';
   const cfg = shiftStore[spec.id];
   shiftPopover.innerHTML = '';
   shiftPopover.style.width = '330px'; shiftPopover.style.maxHeight = 'calc(100vh - 20px)'; shiftPopover.style.overflowY = 'auto';
   const mk = (tag, cls, txt) => { const e = document.createElement(tag); if (cls) e.className = cls; if (txt != null) e.textContent = txt; return e; };
 
   shiftPopover.appendChild(mk('div', 'cf-title', 'Shift - join the data after a jump to the data before it'));
-  const hint = mk('div', 'note', 'Pick two points around the jump: A (last good data before) and B (first good data after). The difference between them is taken away from everything from B on, so the line continues from A. The data between A and B is not used (faint dashed). Several jumps? Do one shift per jump, oldest first. Runs of exact 0 readings after a real level are sensor dropouts and count as no data. Visual only - the raw data is never changed.');
+  const hint = mk('div', 'note', 'Pick two points around the jump: A (last good data before) and B (first good data after). The difference between them is taken away from everything from B on, so the line continues from A. The data between A and B is not used (faint dashed). Tick as many sensors as you like: one A/B range moves all of them at once, each by its own difference. Drag a range on the chart to set A and B in one go; optionally stop the shift at a later time. Several jumps? Do one shift per jump, oldest first. Runs of exact 0 readings after a real level are sensor dropouts and count as no data. Visual only - the raw data is never changed.');
   hint.style.cssText = 'font-size:10px;margin:0 0 8px';
   shiftPopover.appendChild(hint);
 
@@ -4656,9 +4657,9 @@ function openShiftEditor(btn, u, spec, primaryNames, chOwner, badge){
     const exist = mk('div', 'cf-list'); exist.style.maxHeight = '150px';
     cfg.splices.slice().sort((p, q) => p.t - q.t).forEach(sp => {
       const rec = SPLICE_ADD.get(sp) || {};
-      const adds = sp.channels.map(nm => nm + ' ' + (rec[nm] == null ? '?' : ((rec[nm] >= 0 ? '+' : '') + rec[nm].toFixed(3)))).slice(0, 3).join(', ') + (sp.channels.length > 3 ? ' …' : '');
+      const adds = sp.channels.map(nm => nm + ' ' + (rec[nm] == null ? '?' : ((rec[nm] >= 0 ? '+' : '') + rec[nm].toFixed(3)))).slice(0, 3).join(', ') + (sp.channels.length > 3 ? ' … (' + sp.channels.length + ' sensors)' : '');
       const row = mk('div'); row.style.cssText = 'display:flex;gap:6px;align-items:flex-start;font-size:11px';
-      const txt = mk('span', null, (sp.cut && sp.b != null ? 'A ' + fmtDate(sp.b) + ' → B ' + fmtDate(sp.t) + ' (between left out)' : fmtDate(sp.t) + (sp.t2 != null ? ' → ' + fmtDate(sp.t2) : ' → latest')) + ' · ' + (sp.mode === 'manual' ? 'manual' : 'auto ' + (sp.hours >= 1 ? sp.hours + 'h' : Math.round((sp.hours || 24) * 60) + ' min')) + ' · ' + adds);
+      const txt = mk('span', null, (sp.cut && sp.b != null ? 'A ' + fmtDate(sp.b) + ' → B ' + fmtDate(sp.t) + ' (between left out)' + (sp.t2 != null ? ' · shifted until ' + fmtDate(sp.t2) : '') : fmtDate(sp.t) + (sp.t2 != null ? ' → ' + fmtDate(sp.t2) : ' → latest')) + ' · ' + (sp.mode === 'manual' ? 'manual' : 'auto ' + (sp.hours >= 1 ? sp.hours + 'h' : Math.round((sp.hours || 24) * 60) + ' min')) + ' · ' + adds);
       txt.style.flex = '1';
       const del = mk('button', null, '×'); del.type = 'button'; del.title = 'remove this splice';
       del.onclick = () => {
@@ -4683,15 +4684,32 @@ function openShiftEditor(btn, u, spec, primaryNames, chOwner, badge){
   const reopen = () => openShiftEditor(btn, u, spec, primaryNames, chOwner, badge);
   const sgn = v => (v >= 0 ? '+' : '') + v.toFixed(2);
   if (draft.info){ const inf = mk('div', 'note', draft.info); inf.style.cssText = 'font-size:11px;margin:0 0 6px;padding:4px 6px;border:1px solid var(--line);border-radius:4px;background:var(--panel-2)'; shiftPopover.appendChild(inf); draft.info = ''; }
-  shiftPopover.appendChild(stepLab('1  sensor'));
-  const chSel = mk('select'); chSel.style.cssText = 'width:100%;font:12px "IBM Plex Mono",monospace;background:var(--panel-2);color:var(--ink);border:1px solid var(--line);border-radius:4px;padding:4px';
-  primaryNames.forEach(nm => { const o = mk('option', null, nm); o.value = nm; chSel.appendChild(o); });
-  { const o = mk('option', null, 'all channels'); o.value = '*'; chSel.appendChild(o); }
-  const firstShown = primaryNames.find(nm => { const k = seriesIdxByName(u, nm); return k >= 1 && u.series[k].show !== false; }) || primaryNames[0];
-  if (!draft.sensor || (draft.sensor !== '*' && !primaryNames.includes(draft.sensor))) draft.sensor = (draft.channels && draft.channels.length === 1) ? draft.channels[0] : firstShown;
-  chSel.value = draft.sensor;
-  chSel.onchange = () => { draft.sensor = chSel.value; reopen(); };
-  shiftPopover.appendChild(chSel);
+  shiftPopover.appendChild(stepLab('1  sensors (tick one or many)'));
+  const isShown = nm => { const k = seriesIdxByName(u, nm); return k >= 1 && u.series[k].show !== false; };
+  const firstShown = primaryNames.find(isShown) || primaryNames[0];
+  if (!Array.isArray(draft.sel)){          // first open (or an older draft): start from the old single choice
+    draft.sel = draft.sensor === '*' ? primaryNames.slice() : [(draft.sensor && primaryNames.includes(draft.sensor)) ? draft.sensor : ((draft.channels && draft.channels.length === 1) ? draft.channels[0] : firstShown)];
+  }
+  draft.sel = draft.sel.filter(nm => primaryNames.includes(nm));
+  const selNames = () => primaryNames.filter(nm => draft.sel.includes(nm));
+  const reopenKeepScroll = () => { const st = shiftPopover.scrollTop; reopen(); shiftPopover.scrollTop = st; };
+  const selBar = mk('div'); selBar.style.cssText = 'display:flex;gap:4px;flex-wrap:wrap;margin:0 0 4px';
+  [['all', () => primaryNames.slice()], ['none', () => []], ['shown on chart', () => primaryNames.filter(isShown)], ['invert', () => primaryNames.filter(nm => !draft.sel.includes(nm))]].forEach(([lab, fn]) => {
+    const b = mk('button', null, lab); b.type = 'button'; b.style.cssText = 'font:11px "IBM Plex Mono",monospace;padding:2px 7px';
+    b.onclick = () => { draft.sel = fn(); reopenKeepScroll(); };
+    selBar.appendChild(b);
+  });
+  const selCount = mk('span', 'note', selNames().length + ' of ' + primaryNames.length + ' selected'); selCount.style.cssText = 'font-size:10.5px;align-self:center;margin-left:4px';
+  selBar.appendChild(selCount);
+  shiftPopover.appendChild(selBar);
+  const selBox = mk('div'); selBox.style.cssText = 'display:flex;flex-wrap:wrap;gap:2px 10px;max-height:120px;overflow-y:auto;padding:4px 6px;border:1px solid var(--line);border-radius:4px;background:var(--panel-2)';
+  primaryNames.forEach(nm => {
+    const lab = mk('label'); lab.style.cssText = 'display:flex;gap:4px;align-items:center;font:11.5px "IBM Plex Mono",monospace;white-space:nowrap;cursor:pointer';
+    const cb = document.createElement('input'); cb.type = 'checkbox'; cb.checked = draft.sel.includes(nm);
+    cb.onchange = () => { draft.sel = cb.checked ? draft.sel.concat([nm]) : draft.sel.filter(x => x !== nm); reopenKeepScroll(); };
+    lab.append(cb, document.createTextNode(nm)); selBox.appendChild(lab);
+  });
+  shiftPopover.appendChild(selBox);
 
   // the difference between the two points on the CURRENT (already corrected) curve; null when a point has no usable data
   const diffFor = (nm, tA, tB, hrs) => {
@@ -4703,6 +4721,7 @@ function openShiftEditor(btn, u, spec, primaryNames, chOwner, badge){
   const addShiftNow = o => {
     const cur = shiftStore[spec.id] || { splices: [] };
     const sp = { id: cur.splices.reduce((m, s) => Math.max(m, s.id || 0), 0) + 1, t: o.tB, b: o.tA, cut: true, channels: o.channels.slice(), mode: 'auto', hours: o.hours };
+    if (o.t2 != null && isFinite(o.t2)) sp.t2 = o.t2;
     cur.splices.push(sp);
     shiftStore[spec.id] = cur;
     rebuildPrimaryData(u, chOwner, primaryNames, spec.id);
@@ -4716,13 +4735,61 @@ function openShiftEditor(btn, u, spec, primaryNames, chOwner, badge){
     if (u.scales.y._rangeOrig === undefined) setScaleAuto(u, 'y');
     refreshShiftBadge(badge, spec.id);
     const info = [];
-    if (!failed.length){ const ad = rec[o.channels[0]]; if (ad != null) info.push('done: ' + o.channels[0] + ' from ' + fmtDate(o.tB) + ' on moved by ' + sgn(ad) + '°; the data between ' + fmtDate(o.tA) + ' and ' + fmtDate(o.tB) + ' is left out (faint dashed)'); }
+    const okCh = sp.channels.filter(nm => rec[nm] != null);
+    const until = sp.t2 != null ? ' until ' + fmtDate(sp.t2) : ' onward';
+    if (okCh.length === 1){ info.push('done: ' + okCh[0] + ' from ' + fmtDate(o.tB) + until + ' moved by ' + sgn(rec[okCh[0]]) + '°; the data between ' + fmtDate(o.tA) + ' and ' + fmtDate(o.tB) + ' is left out (faint dashed)'); }
+    else if (okCh.length > 1){ info.push('done: ' + okCh.length + ' sensors from ' + fmtDate(o.tB) + until + ' moved (' + okCh.slice(0, 6).map(nm => nm + ' ' + sgn(rec[nm])).join(', ') + (okCh.length > 6 ? ' …' : '') + '); the data between ' + fmtDate(o.tA) + ' and ' + fmtDate(o.tB) + ' is left out (faint dashed)'); }
     return { failed, info };
   };
 
-  shiftPopover.appendChild(stepLab('2  pick two points'));
-  const how = mk('div', 'note', 'A = the last good data BEFORE the jump, B = the first good data AFTER it. The tool takes the difference between the two points and moves everything from B on by it, so the line continues from A. The data between A and B is not used: it stays only as a faint dashed copy of the old data.');
+  shiftPopover.appendChild(stepLab('2  pick the range A → B'));
+  const how = mk('div', 'note', 'A = the last good data BEFORE the jump, B = the first good data AFTER it. The tool takes the difference between the two points (for every ticked sensor) and moves everything from B on by it, so the line continues from A. The data between A and B is not used: it stays only as a faint dashed copy of the old data.');
   how.style.cssText = 'font-size:10.5px;margin:0 0 6px'; shiftPopover.appendChild(how);
+  // one drag across the jump sets A (left edge) and B (right edge) together
+  const pickRangeOnChart = () => {
+    closeShiftPopover();
+    let st = null, box = null;
+    const toT = cx => { const rect = u.over.getBoundingClientRect(); const { xMin, xMax } = resolveXRange(u, spec); return xMin + ((cx - rect.left) / rect.width) * (xMax - xMin); };
+    const cleanup = () => {
+      u.over.removeEventListener('mousedown', onDown, true); window.removeEventListener('mousemove', onMove, true); window.removeEventListener('mouseup', onUp, true);
+      window.removeEventListener('keydown', esc); u.over.style.cursor = ''; if (box && box.parentNode) box.parentNode.removeChild(box); box = null;
+    };
+    const esc = ev => { if (ev.key === 'Escape') cleanup(); };
+    const onDown = e => {
+      if (e.button !== 0) return;
+      e.stopImmediatePropagation(); e.preventDefault();
+      st = { x: e.clientX };
+      box = document.createElement('div');
+      box.style.cssText = 'position:absolute;top:0;bottom:0;pointer-events:none;background:rgba(217,83,30,.18);border-left:2px solid #d9531e;border-right:2px solid #d9531e';
+      u.over.appendChild(box);
+      window.addEventListener('mousemove', onMove, true); window.addEventListener('mouseup', onUp, true);
+      onMove(e);
+    };
+    const onMove = e => {
+      if (!st || !box) return;
+      const rect = u.over.getBoundingClientRect();
+      const x0 = Math.max(0, Math.min(st.x, e.clientX) - rect.left), x1 = Math.min(rect.width, Math.max(st.x, e.clientX) - rect.left);
+      box.style.left = x0 + 'px'; box.style.width = Math.max(0, x1 - x0) + 'px';
+    };
+    const onUp = e => {
+      window.removeEventListener('mousemove', onMove, true); window.removeEventListener('mouseup', onUp, true);
+      if (!st) return;
+      const moved = Math.abs(e.clientX - st.x);
+      if (moved < 4){ if (box && box.parentNode) box.parentNode.removeChild(box); box = null; st = null; return; }   // a plain click: keep waiting for a real drag
+      const ta = toT(Math.min(st.x, e.clientX)), tb = toT(Math.max(st.x, e.clientX));
+      const swallow = ev => { ev.stopImmediatePropagation(); ev.preventDefault(); };
+      u.over.addEventListener('click', swallow, true); setTimeout(() => u.over.removeEventListener('click', swallow, true), 0);   // the drag's own click must not reach the chart tools
+      cleanup();
+      draft.a = fmtBkkLocal(Math.floor(ta / 60) * 60); draft.bt = fmtBkkLocal(Math.ceil(tb / 60) * 60);
+      reopen();
+    };
+    u.over.addEventListener('mousedown', onDown, true);
+    u.over.style.cursor = 'crosshair';
+    window.addEventListener('keydown', esc);
+  };
+  { const rb = mk('button', null, 'drag a range on the chart (sets A and B)'); rb.type = 'button'; rb.style.cssText = 'font:700 11.5px "IBM Plex Mono",monospace;padding:4px 8px;margin:0 0 6px;width:100%';
+    rb.title = 'the window closes; press on the chart at the start of the jump, drag to its end and release; the window reopens with A and B filled (Esc = cancel)';
+    rb.onclick = pickRangeOnChart; shiftPopover.appendChild(rb); }
   const pickOnChart = key => {
     closeShiftPopover();
     let down = null;
@@ -4744,7 +4811,7 @@ function openShiftEditor(btn, u, spec, primaryNames, chOwner, badge){
     window.addEventListener('keydown', function esc(ev){ if (ev.key === 'Escape'){ cleanup(); window.removeEventListener('keydown', esc); } });
   };
   const prevBox = mk('div', 'note'); prevBox.style.cssText = 'font-size:11px;margin:4px 0 6px;font-weight:700';
-  const timeRow = (label, key) => {
+  const timeRow = (label, key, optional) => {
     const box = mk('div'); box.style.marginBottom = '6px';
     const lab = mk('div', 'note', label); lab.style.cssText = 'font-size:10.5px;margin-bottom:2px';
     const line = mk('div'); line.style.cssText = 'display:flex;gap:6px;align-items:center;flex-wrap:wrap';
@@ -4754,11 +4821,13 @@ function openShiftEditor(btn, u, spec, primaryNames, chOwner, badge){
     pick.title = 'the window closes; click the chart at that time and it reopens with the time filled in (Esc = cancel)';
     pick.onclick = () => pickOnChart(key);
     line.append(inp, pick);
+    if (optional){ const clr = mk('button', null, 'until latest'); clr.type = 'button'; clr.style.fontSize = '11px'; clr.title = 'no end time: the shift runs to the latest data'; clr.onclick = () => { draft[key] = ''; inp.value = ''; updatePreview(); }; line.appendChild(clr); }
     box.append(lab, line); shiftPopover.appendChild(box);
     return inp;
   };
   const aIn = timeRow('POINT A - last good data before the jump (Bangkok time)', 'a');
   const bIn = timeRow('POINT B - first good data after the jump (Bangkok time)', 'bt');
+  const t2In = timeRow('STOP the shift at (optional, Bangkok time) - empty = the shift runs to the latest data; set it to move only a stretch (e.g. a temporary offset)', 't2', true);
   const avgRow = mk('label'); avgRow.style.cssText = 'display:flex;gap:6px;align-items:center;flex-wrap:wrap;font-size:11.5px;margin-bottom:4px';
   const minIn = document.createElement('input'); minIn.type = 'number'; minIn.min = '1'; minIn.max = '720'; minIn.step = '1'; minIn.value = draft.minutes || 60; minIn.style.width = '64px';
   avgRow.append(document.createTextNode('level at each point = average of '), minIn, document.createTextNode(' min of good data (before A / after B)'));
@@ -4770,34 +4839,55 @@ function openShiftEditor(btn, u, spec, primaryNames, chOwner, badge){
     prevBox.textContent = '';
     if (!isFinite(tA) || !isFinite(tB)){ prevBox.textContent = 'pick A and B to see the difference'; return; }
     if (tB <= tA){ prevBox.textContent = 'B must be later than A'; return; }
-    const nm = draft.sensor === '*' ? firstShown : draft.sensor, d = diffFor(nm, tA, tB, draft.minutes / 60);
-    prevBox.textContent = d == null ? 'no good data before A or after B for ' + nm : 'difference B − A = ' + sgn(d) + '°  →  from B on the data moves by ' + sgn(-d) + '°';
+    const names = selNames();
+    if (!names.length){ prevBox.textContent = 'tick at least one sensor'; return; }
+    prevBox.appendChild(mk('div', null, 'difference B − A → the data from B on moves by (' + names.length + ' sensor' + (names.length === 1 ? '' : 's') + '):'));
+    names.slice(0, 8).forEach(nm => {
+      const d = diffFor(nm, tA, tB, draft.minutes / 60);
+      const ln = mk('div', null, nm + '   ' + (d == null ? 'no good data before A or after B' : sgn(d) + '°  →  ' + sgn(-d) + '°'));
+      ln.style.cssText = 'font-weight:400;font-family:"IBM Plex Mono",monospace;font-size:10.5px' + (d == null ? ';color:#c0392b' : '');
+      prevBox.appendChild(ln);
+    });
+    if (names.length > 8) prevBox.appendChild(mk('div', null, '… and ' + (names.length - 8) + ' more (each gets its own value when you add the shift)'));
   };
   minIn.onchange = updatePreview;
   updatePreview();
 
   // where does the chosen sensor jump? every gap in the data and every sudden step, oldest first. 'join' = take A and B around that jump and shift at once
-  const jNames = draft.sensor === '*' ? primaryNames : [draft.sensor];
+  const jNames = selNames();
   const hoursTxt = h => (h < 1 ? Math.max(1, Math.round(h * 60)) + ' min' : h < 48 ? h.toFixed(0) + ' h' : (h / 24).toFixed(1) + ' d');
-  const jumps = findBreakCandidates(chOwner, jNames, 1).map(c => ({ nm: c.nm, tA: c.t0, tB: c.t1, text: c.nm + ' · no data ' + fmtDate(c.t0) + ' → ' + fmtDate(c.t1) + ' (' + hoursTxt(c.hours) + ') · level change ' + sgn(c.jump) }));
+  // jumps of the ticked sensors; the same jump seen on several sensors is ONE line that joins all of them
+  const jmap = new Map();
+  const addJump = (key, tA, tB, nm, kindText, change) => {
+    let g = jmap.get(key); if (!g){ g = { tA, tB, kindText, items: [] }; jmap.set(key, g); }
+    g.items.push({ nm, change });
+  };
+  findBreakCandidates(chOwner, jNames, 1).forEach(c => addJump('g' + Math.round(c.t0 / 60) + '_' + Math.round(c.t1 / 60), c.t0, c.t1, c.nm, 'no data ' + fmtDate(c.t0) + ' → ' + fmtDate(c.t1) + ' (' + hoursTxt(c.hours) + ')', c.jump));
   if (trendUnitFor(spec) === '°') findStepCandidates(chOwner, jNames, 0.05).forEach(e => {
-    const w = e.items.filter(it => jNames.includes(it.nm)).sort((p, q) => Math.abs(q.delta) - Math.abs(p.delta))[0]; if (!w) return;
-    jumps.push({ nm: w.nm, tA: e.t0 - 60, tB: Math.ceil((e.t1 + 60) / 60) * 60, text: w.nm + ' · sudden step at ' + fmtDate(e.t0) + ' · ' + sgn(w.delta) + '°' });
+    const its = e.items.filter(it => jNames.includes(it.nm)); if (!its.length) return;
+    its.forEach(it => addJump('s' + Math.round(e.t0 / 60), e.t0 - 60, Math.ceil((e.t1 + 60) / 60) * 60, it.nm, 'sudden step at ' + fmtDate(e.t0), it.delta));
+  });
+  const jumps = [...jmap.values()].map(g => {
+    g.items.sort((p, q) => Math.abs(q.change) - Math.abs(p.change));
+    const w = g.items[0], n = g.items.length;
+    g.channels = [...new Set(g.items.map(it => it.nm))];
+    g.text = (n === 1 ? w.nm : n + ' sensors (' + g.channels.slice(0, 3).join(', ') + (n > 3 ? ' …' : '') + ')') + ' · ' + g.kindText + ' · ' + (n === 1 ? 'level change ' : 'largest ') + sgn(w.change) + '°';
+    return g;
   });
   jumps.sort((p, q) => p.tB - q.tB);
   const jBox = document.createElement('details'); jBox.open = true; jBox.style.marginBottom = '8px';
-  const jSum = mk('summary', 'note', 'where does ' + (draft.sensor === '*' ? 'a channel' : draft.sensor) + ' jump? (' + jumps.length + ' found, oldest first)'); jSum.style.cursor = 'pointer'; jBox.appendChild(jSum);
-  jBox.appendChild(mk('div', 'note', 'click a line = fill A and B from it · "join" = fill them and shift at once (do it for each jump, oldest first)'));
+  const jSum = mk('summary', 'note', 'where do the ticked sensors jump? (' + jumps.length + ' found, oldest first)'); jSum.style.cursor = 'pointer'; jBox.appendChild(jSum);
+  jBox.appendChild(mk('div', 'note', 'click a line = fill A and B from it · "join" = fill them and shift every sensor listed on that line at once (do it for each jump, oldest first)'));
   const jList = mk('div', 'cf-list'); jList.style.maxHeight = '170px';
-  if (!jumps.length) jList.appendChild(mk('div', 'note', 'nothing found for this sensor - pick A and B yourself'));
+  if (!jumps.length) jList.appendChild(mk('div', 'note', 'nothing found for the ticked sensors - pick A and B yourself'));
   jumps.slice(0, 120).forEach(j => {
     const row = mk('div'); row.style.cssText = 'display:flex;gap:4px;align-items:stretch;margin:0 0 2px';
     const fill = mk('button', null, j.text); fill.type = 'button'; fill.style.cssText = 'flex:1;text-align:left;font:11px "IBM Plex Mono",monospace;padding:2px 4px;white-space:normal';
-    fill.onclick = () => { draft.a = fmtBkkLocal(j.tA); draft.bt = fmtBkkLocal(j.tB); if (draft.sensor !== '*') draft.sensor = j.nm; reopen(); };
-    const join = mk('button', null, 'join'); join.type = 'button'; join.style.cssText = 'font:700 11px "IBM Plex Mono",monospace;padding:2px 8px'; join.title = 'A and B around this jump, then shift everything after B so the line continues';
+    fill.onclick = () => { draft.a = fmtBkkLocal(j.tA); draft.bt = fmtBkkLocal(j.tB); reopen(); };
+    const join = mk('button', null, 'join'); join.type = 'button'; join.style.cssText = 'font:700 11px "IBM Plex Mono",monospace;padding:2px 8px'; join.title = 'A and B around this jump, then shift everything after B (for every sensor on this line) so the lines continue';
     join.onclick = () => {
-      const r = addShiftNow({ tA: j.tA, tB: j.tB, channels: [j.nm], hours: Math.max(1, Number(minIn.value) || 60) / 60 });
-      draft.info = r.failed.length ? 'no usable data before and after that jump for ' + j.nm : r.info.join(' · ');
+      const r = addShiftNow({ tA: j.tA, tB: j.tB, channels: j.channels, hours: Math.max(1, Number(minIn.value) || 60) / 60 });
+      draft.info = r.failed.length ? 'no usable data before and after that jump for ' + r.failed.join(', ') + (r.info.length ? ' · ' + r.info.join(' · ') : '') : r.info.join(' · ');
       draft.a = ''; draft.bt = '';
       reopen();
     };
@@ -4817,13 +4907,19 @@ function openShiftEditor(btn, u, spec, primaryNames, chOwner, badge){
   applyBtn.onclick = () => {
     const tA = parseBkkLocal(aIn.value), tB = parseBkkLocal(bIn.value);
     draft.minutes = Math.max(1, Number(minIn.value) || 60);
-    const selected = draft.sensor === '*' ? primaryNames.slice() : [draft.sensor];
-    if (!isFinite(tA) || !isFinite(tB)){ err.textContent = 'pick POINT A and POINT B (type the time or use "pick on chart")'; return; }
+    const selected = selNames();
+    const t2 = t2In.value ? parseBkkLocal(t2In.value) : null;
+    if (!isFinite(tA) || !isFinite(tB)){ err.textContent = 'pick POINT A and POINT B (type the time or use "pick on chart" / "drag a range")'; return; }
     if (tB <= tA){ err.textContent = 'POINT B must be later than POINT A'; return; }
-    if (!selected.length || !selected[0]){ err.textContent = 'choose a sensor'; return; }
-    const r = addShiftNow({ tA, tB, channels: selected, hours: draft.minutes / 60 });
-    if (r.failed.length){ err.textContent = 'no usable data before A or after B for: ' + r.failed.join(', '); return; }
-    draft.info = r.info.join(' · '); draft.a = ''; draft.bt = '';
+    if (t2 != null && (!isFinite(t2) || t2 <= tB)){ err.textContent = 'the STOP time must be later than POINT B (or leave it empty)'; return; }
+    if (!selected.length){ err.textContent = 'tick at least one sensor'; return; }
+    const r = addShiftNow({ tA, tB, t2, channels: selected, hours: draft.minutes / 60 });
+    if (r.failed.length){
+      if (!r.info.length){ err.textContent = 'no usable data before A or after B for: ' + r.failed.join(', '); return; }   // nothing was shifted: keep the form as it is
+      draft.info = 'no usable data before A or after B for: ' + r.failed.join(', ') + ' (not shifted). Others: ' + r.info.join(' · '); draft.a = ''; draft.bt = ''; draft.t2 = '';
+      openShiftEditor(btn, u, spec, primaryNames, chOwner, badge); return;
+    }
+    draft.info = r.info.join(' · '); draft.a = ''; draft.bt = ''; draft.t2 = '';
     openShiftEditor(btn, u, spec, primaryNames, chOwner, badge);
   };
   clearBtn.onclick = () => {
@@ -5844,8 +5940,37 @@ function buildEnvelopePoints(days, totals, rolling3, fromEpoch, toEpoch, todaySt
   base.latestPt = live || (pts.length ? pts[pts.length - 1] : null);
   return base;
 }
+// REAL-TIME envelope: instead of one dot per calendar day, the plane is sampled every `stepSec` seconds along the record.
+// At time t: y = rain in the last 24 h (t-24h, t], x = rain in the last 72 h (t-72h, t] (the same "3-day cumulative includes the day" reading as the daily dots),
+// both integrated from the 1-minute rain rate exactly like the daily totals (gaps >= 1 h count as no rain, no data = no point). A point needs >= 12 h of
+// valid rate in its 24 h window and >= 36 h in its 72 h window, so an outage never draws a fake "dry" point. The newest point is the last logger sample itself.
+function buildRealtimePoints(st, fromEpoch, toEpoch, stepSec){
+  const xs = st.xs, rate = st.CH['rainfall_rate'], n = xs.length, ICT = 7 * 3600;
+  const cum = new Float64Array(n), cov = new Float64Array(n);
+  let a = 0, c = 0;
+  for (let i = 0; i < n; i++){
+    if (i > 0){ const dtH = (xs[i] - xs[i - 1]) / 3600, r = rate[i]; if (!isNaN(r) && dtH > 0 && dtH < 1){ a += r * dtH; c += dtH; } }
+    cum[i] = a; cov[i] = c;
+  }
+  const idxAt = t => Math.max(0, lowerBound(xs, t + 0.001, 0, n) - 1);
+  const pt = t => {
+    const k = idxAt(t), k24 = idxAt(t - 86400), k72 = idxAt(t - 3 * 86400);
+    if (t - 86400 < xs[0]) return null;                                   // the 24 h window must start inside the record
+    if (cov[k] - cov[k24] < 12 || cov[k] - cov[k72] < 36) return null;
+    return { t, y: cum[k] - cum[k24], x: cum[k] - cum[k72] };
+  };
+  const lo = Math.max(fromEpoch, xs[0]), hi = Math.min(toEpoch, xs[n - 1]);
+  const pts = [];
+  for (let g = Math.ceil((lo + ICT) / stepSec) * stepSec - ICT; g <= hi; g += stepSec){ const p = pt(g); if (p) pts.push(p); }
+  const tl = xs[n - 1];
+  let latest = null;
+  if (tl >= fromEpoch && tl <= toEpoch){ latest = pt(tl); if (latest){ latest.last = true; if (!pts.length || pts[pts.length - 1].t < tl) pts.push(latest); else latest = pts[pts.length - 1]; } }
+  if (!latest && pts.length) latest = pts[pts.length - 1];
+  return { xs: pts.map(p => p.x), ys: pts.map(p => p.y), ts: pts.map(p => p.t), live: null, latestPt: latest, liveLabel: (latest && latest.t === tl) ? latest : null };
+}
 function makeEnvelopeChart(spec){
   const st = spec.chOwner;
+  let mode = 'rt', stepMin = 60;           // 'rt' = real-time rolling 24 h / 72 h, 'day' = one dot per calendar day
   // stored minutes + the minutes that arrived after the page was opened (LIVE.tail)
   let days, totals, rolling3;
   const recompute = () => { const r = computeDailyTotals(LIVE.rainStation(st)); days = r.days; totals = r.totals; rolling3 = computeRolling3Day(days, totals); };
@@ -5872,6 +5997,25 @@ function makeEnvelopeChart(spec){
   note.style.margin = '0 0 6px';
   note.textContent = 'each point is one Asia/Bangkok calendar day — x = trailing 3-day cumulative rainfall, y = that day’s total (same sums as the Rainfall chart’s daily/3-day-total tabs), connected in date order so the line traces the actual rainfall trajectory across the plane. Dashed diagonals are the AP-Model Level 1/2 boundary lines from the site’s reference figure (see the legend below for the current mm values — editable from the Sensor Readings page) — a point above/right of a line is past that level. A dot is a finished day (00:00–24:00 ICT); today is a dashed live trace that follows the logger every minute, and its newest value is the red circle.';
   wrap.appendChild(note);
+  const NOTE_DAY = note.textContent;
+  const NOTE_RT = 'REAL-TIME: the plane is sampled continuously along the record, not once a day. At each moment y = rain in the last 24 hours and x = rain in the last 72 hours (both integrated from the 1-minute rain rate, the same sums as the daily dots but with a sliding window), joined oldest → newest so the line is the storm path as it happened. A moment needs at least 12 h of valid rain data in its 24 h window and 36 h in its 72 h window (an outage never draws a fake dry point). Dashed diagonals are the AP-Model Level 1/2 boundary lines — a point above/right of a line is past that level. The red circle is the newest logger sample and moves with every new minute.';
+
+  // view mode: real-time sliding window (default) or one dot per calendar day
+  const modeRow = document.createElement('div');
+  modeRow.className = 'view-toggle envelope-controls';
+  const modeBtns = {};
+  const mkModeBtn = (key, txt, title, fn) => { const b = document.createElement('button'); b.textContent = txt; b.title = title; b.onclick = fn; modeBtns[key] = b; modeRow.appendChild(b); return b; };
+  const stepLbl = document.createElement('label'); stepLbl.textContent = 'one point every';
+  const stepSel = document.createElement('select');
+  [[10, '10 min'], [30, '30 min'], [60, '1 hour'], [180, '3 hours']].forEach(([m, t]) => { const o = document.createElement('option'); o.value = m; o.textContent = t; stepSel.appendChild(o); });
+  stepSel.value = String(stepMin); stepLbl.appendChild(stepSel);
+  mkModeBtn('rt', 'real-time (rolling 24 h / 72 h)', 'sliding window: y = last 24 h, x = last 72 h, sampled continuously', () => setMode('rt'));
+  mkModeBtn('day', 'daily dots', 'one dot per calendar day (00:00-24:00 ICT)', () => setMode('day'));
+  modeRow.appendChild(stepLbl);
+  wrap.appendChild(modeRow);
+  const syncModeUi = () => { modeBtns.rt.classList.toggle('on', mode === 'rt'); modeBtns.day.classList.toggle('on', mode === 'day'); stepLbl.style.display = mode === 'rt' ? '' : 'none'; note.textContent = mode === 'rt' ? NOTE_RT : NOTE_DAY; };
+  let setMode = m => { mode = m; syncModeUi(); };    // replaced below, once build() exists
+  stepSel.onchange = () => { stepMin = Number(stepSel.value) || 60; setMode('rt'); };
 
   const ctrlRow = document.createElement('div');
   ctrlRow.className = 'view-toggle envelope-controls';
@@ -5957,9 +6101,14 @@ function makeEnvelopeChart(spec){
   const dotColor = st.stripe;
   const legend = document.createElement('div');
   legend.className = 'legend';
-  legend.innerHTML = '<label><i style="background:' + dotColor + '"></i> one dot = one finished day (00:00–24:00 ICT), joined oldest → newest</label>' +
-    '<label><i style="background:repeating-linear-gradient(90deg,' + dotColor + ' 0 4px,transparent 4px 7px)"></i> today so far (live)</label>' +
-    '<label><i style="background:' + COLOR_CRIT + '"></i> latest value (red circle, updates every minute)</label>';
+  const setLegend = () => {
+    legend.innerHTML = (mode === 'rt'
+      ? '<label><i style="background:' + dotColor + '"></i> one point = one moment (last 24 h vs last 72 h), joined oldest → newest</label>'
+      : '<label><i style="background:' + dotColor + '"></i> one dot = one finished day (00:00–24:00 ICT), joined oldest → newest</label>' +
+        '<label><i style="background:repeating-linear-gradient(90deg,' + dotColor + ' 0 4px,transparent 4px 7px)"></i> today so far (live)</label>') +
+      '<label><i style="background:' + COLOR_CRIT + '"></i> latest value (red circle, updates every minute)</label>';
+  };
+  setLegend();
   wrap.appendChild(legend);
   const envThreshLegend = buildThresholdLegend(envelopeThresholds);
   if (envThreshLegend) wrap.appendChild(envThreshLegend);
@@ -5979,7 +6128,7 @@ function makeEnvelopeChart(spec){
   tip.className = 'env-tip';
   tip.style.cssText = 'position:absolute;display:none;pointer-events:none;z-index:5;background:var(--panel,#fff);color:var(--ink,#141413);border:1px solid var(--line,#999);border-radius:6px;padding:5px 8px;font:11px "IBM Plex Mono",monospace;line-height:1.5;box-shadow:0 2px 8px rgba(0,0,0,.25);white-space:nowrap';
   holder.appendChild(tip);
-  let hoverIdx = -1, curPts = { xs: [], ys: [], ts: [], nc: 0 }, curLive = null;
+  let hoverIdx = -1, curPts = { xs: [], ys: [], ts: [], nc: 0 }, curLive = null, curLabel = null, curRt = false;
   let xTop = 545, yTop = 365;
   const fmtDay = t => new Date((t + 7 * 3600) * 1000).toLocaleDateString('en-GB', { timeZone: 'UTC', weekday: 'short', day: '2-digit', month: 'short', year: 'numeric' });
   const levelOf = (v, w, c) => (c != null && v >= c) ? ' \u2265 critical' : (w != null && v >= w) ? ' \u2265 watch' : '';
@@ -6005,9 +6154,11 @@ function makeEnvelopeChart(spec){
   [sx0, sx1, sy0, sy1].forEach(i => i.addEventListener('keydown', e => { if (e.key === 'Enter') scSet.onclick(); }));
   function build(fromEpoch, toEpoch, keepView){
     const lastT = lastSampleOf();
-    const { xs, ys, ts, live, latestPt } = buildEnvelopePoints(days, totals, rolling3, fromEpoch, toEpoch, bkkMidnight(Date.now() / 1000), lastT);
+    const rt = mode === 'rt';
+    const { xs, ys, ts, live, latestPt, liveLabel } = rt ? buildRealtimePoints(LIVE.rainStation(st), fromEpoch, toEpoch, stepMin * 60)
+      : buildEnvelopePoints(days, totals, rolling3, fromEpoch, toEpoch, bkkMidnight(Date.now() / 1000), lastT);
     const nc = xs.length;
-    curLive = live;
+    curLive = live; curLabel = rt ? liveLabel : live; curRt = rt;
     curPts = { xs: xs.concat(live ? [live.x] : []), ys: ys.concat(live ? [live.y] : []), ts: ts.concat(live ? [live.t] : []), nc };
     hoverIdx = -1; tip.style.display = 'none'; if (!keepView) view = null;
     const X = xs.slice(), Y1 = ys.slice(), Y2 = xs.map(() => null);
@@ -6023,12 +6174,12 @@ function makeEnvelopeChart(spec){
         y: { time: false, range: () => view ? [view.y0, view.y1] : [0, yTop * 1.12] },
       },
       axes: [
-        axisOpts('x', 2, { size: 40, label: '3-day cumulative rainfall (mm)' }),
-        axisOpts('y', 3, { size: 56, label: 'Daily rainfall (mm)' }),
+        axisOpts('x', 2, { size: 40, label: rt ? 'Rainfall in the last 72 h (mm)' : '3-day cumulative rainfall (mm)' }),
+        axisOpts('y', 3, { size: 56, label: rt ? 'Rainfall in the last 24 h (mm)' : 'Daily rainfall (mm)' }),
       ],
       series: [
         {},
-        { label: 'finished days', stroke: dotColor, width: 1.5, points: { show: true, size: 5, fill: dotColor, stroke: dotColor } },
+        { label: rt ? 'moments (rolling 24 h / 72 h)' : 'finished days', stroke: dotColor, width: rt ? 1.2 : 1.5, points: { show: true, size: rt ? 3 : 5, fill: dotColor, stroke: dotColor } },
         { label: 'today so far (live)', stroke: dotColor, width: 1.5, dash: [5, 4], points: { show: false } },
       ],
       legend: { show: false },
@@ -6041,9 +6192,9 @@ function makeEnvelopeChart(spec){
         ctx.font = (10 * dpr) + 'px "IBM Plex Mono", monospace'; ctx.textBaseline = 'bottom'; ctx.fillStyle = COLOR_INK || '#141413';
         const lab = (i, dx, dy) => { const px = u.valToPos(curPts.xs[i], 'x', true), py = u.valToPos(curPts.ys[i], 'y', true); ctx.fillText(fmtShort(curPts.ts[i]).replace(/,? \d\d:\d\d$/, ''), px + dx * dpr, py + dy * dpr); };
         if (curPts.nc) lab(0, 6, -6);
-        if (curLive){
-          const px = u.valToPos(curLive.x, 'x', true), py = u.valToPos(curLive.y, 'y', true);
-          ctx.fillStyle = COLOR_CRIT; ctx.fillText('live ' + new Date((curLive.t + 7 * 3600) * 1000).toISOString().slice(11, 16), px + 11 * dpr, py - 8 * dpr);
+        if (curLabel){
+          const px = u.valToPos(curLabel.x, 'x', true), py = u.valToPos(curLabel.y, 'y', true);
+          ctx.fillStyle = COLOR_CRIT; ctx.fillText('live ' + new Date((curLabel.t + 7 * 3600) * 1000).toISOString().slice(11, 16), px + 11 * dpr, py - 8 * dpr);
         }
         if (hoverIdx >= 0){
           const px = u.valToPos(curPts.xs[hoverIdx], 'x', true), py = u.valToPos(curPts.ys[hoverIdx], 'y', true);
@@ -6068,6 +6219,10 @@ function makeEnvelopeChart(spec){
       if (bi < 0){ tip.style.display = 'none'; over.style.cursor = ''; return; }
       over.style.cursor = 'pointer';
       const dy = curPts.ys[bi], d3 = curPts.xs[bi];
+      if (curRt){
+        tip.innerHTML = '<b>' + fmtDate(curPts.ts[bi]) + '</b><br>last 24 h ' + dy.toFixed(1) + ' mm' + levelOf(dy, thresholds.rainDaily.warn, thresholds.rainDaily.crit) +
+          '<br>last 72 h ' + d3.toFixed(1) + ' mm' + levelOf(d3, thresholds.rain3day.warn, thresholds.rain3day.crit) + '<br><span style="opacity:.65">moment ' + (bi + 1) + ' of ' + curPts.nc + ' in range</span>';
+      } else
       tip.innerHTML = (bi >= curPts.nc ? '<b>Today so far · live</b><br><span style="opacity:.65">logger sample ' + fmtDate(curPts.ts[bi]) + '</span><br>' : '<b>' + fmtDay(curPts.ts[bi]) + '</b><br>') + 'daily ' + dy.toFixed(1) + ' mm' + levelOf(dy, thresholds.rainDaily.warn, thresholds.rainDaily.crit) +
         '<br>3-day ' + d3.toFixed(1) + ' mm' + levelOf(d3, thresholds.rain3day.warn, thresholds.rain3day.crit) + (bi >= curPts.nc ? '<br><span style="opacity:.65">not finished - the red circle moves with every new sample</span>' : '<br><span style="opacity:.65">finished day ' + (bi + 1) + ' of ' + curPts.nc + ' in range</span>');
       tip.style.display = 'block';
@@ -6106,12 +6261,22 @@ function makeEnvelopeChart(spec){
       applyView({ x0: Math.min(xa, xb), x1: Math.max(xa, xb), y0: Math.min(ya, yb), y1: Math.max(ya, yb) });
     });
     over.addEventListener('dblclick', () => applyView(null));
-    caption.textContent = latestPt
+    if (rt) caption.textContent = latestPt
+      ? (nc ? 'range ' + fmtDate(ts[0]) + ' → ' + fmtDate(ts[nc - 1]) + ' (' + nc + ' moments, one every ' + (stepMin >= 60 ? stepMin / 60 + ' h' : stepMin + ' min') + ')' : 'no moment in this range') + ' · latest moment with enough data (' + fmtDate(latestPt.t) + (latestPt.t < lastT ? ', after it the logger gave too little rain data' : ', the last logger sample') + '): last 24 h ' + latestPt.y.toFixed(1) + ' mm, last 72 h ' + latestPt.x.toFixed(1) + ' mm · point at a dot to see its time'
+      : 'no data in the selected range (a moment needs 12 h of rain data in its 24 h window and 36 h in its 72 h window).';
+    else caption.textContent = latestPt
       ? (nc ? 'range ' + fmtDay(ts[0]) + ' → ' + fmtDay(ts[nc - 1]) + ' (' + nc + ' finished days)' : 'no finished day in this range') + ' · latest value' + (live ? ' (today so far, last logger sample ' : ' (' ) + fmtDate(latestPt.t) + '): daily ' + latestPt.y.toFixed(1) + ' mm, 3-day cumulative ' + latestPt.x.toFixed(1) + ' mm · point at a dot to see its date'
       : 'no data in the selected range.';
   }
+  syncModeUi();
   build(days[0], days[days.length - 1] + 86400 - 1);
   envelopeCharts.push(entry);
+  // switching mode / step re-draws over the currently chosen date range, keeping the zoom off (the two modes have different scales)
+  setMode = m => {
+    mode = m; syncModeUi(); setLegend();
+    const f = bkkDateStrToEpoch(fromInput.value, false), t = bkkDateStrToEpoch(toInput.value, true);
+    if (isFinite(f) && isFinite(t) && f <= t) build(f, t);
+  };
 
   applyBtn.onclick = () => {
     const f = bkkDateStrToEpoch(fromInput.value, false);
