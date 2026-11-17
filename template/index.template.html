@@ -846,7 +846,7 @@ button.chat-dl-btn:disabled{opacity:.55;cursor:default}
   <h1>Phangan Slope Monitoring</h1>
   <div class="meta" id="meta-line">loading…</div>
   <div class="note">Station 01: tilt_5/6/7 = node 11 (11_tilt1..3) &middot; tilt_8 = node 10 (with soil 1-3) &middot; tilt_9 = node 12 (with soil 4-6) &middot; tilt_1..4 x/y = 2-axis nodes 2-5.
-  &nbsp; Station 02: tilt_5 = 13_tilt1 (with soil 1-4) &middot; tilt_6 = 13_tilt2 (with soil 5-8) &middot; tilt_1..4 x/y = 2-axis nodes 6-9.<br><b>Data coverage:</b> full sensor set, 1-minute resolution, 25 Jun 2026 &ndash; __DATA_END__ ICT. 25 Jun &ndash; 25 Aug 08:59 from the original export; 25 Aug 09:00 onward from the ThingsBoard DRR dashboard (public view). The old &lsquo;alarm&rsquo; channel stops on 2 Sep 2026; ThingsBoard now publishes <b>alarm1</b> and <b>alarm2</b> (0/1 flags, meaning not yet confirmed) &mdash; both are shown here as informational tiles/series and do not change the station status.</div>
+  &nbsp; Station 02: tilt_5 = 13_tilt1 (with soil 1-4) &middot; tilt_6 = 13_tilt2 (with soil 5-8) &middot; tilt_1..4 x/y = 2-axis nodes 6-9.<br><b>Data coverage:</b> full sensor set, 1-minute resolution, 26 Jun 2026 &ndash; __DATA_END__ ICT (26 Jun 00:00 = first day on which rain, tilt and soil moisture/temperature of both stations are all converted to engineering units; the soil channels were raw mV before 25 Jun ~16:00). 26 Jun &ndash; 25 Aug 08:59 from the original export; 25 Aug 09:00 onward from the ThingsBoard DRR dashboard (public view). The old &lsquo;alarm&rsquo; channel stops on 2 Sep 2026; ThingsBoard now publishes <b>alarm1</b> and <b>alarm2</b> (0/1 flags, meaning not yet confirmed) &mdash; both are shown here as informational tiles/series and do not change the station status.</div>
 </header>
 
 <div id="loading">unpacking data&hellip;</div>
@@ -1127,22 +1127,28 @@ function appendExtra(st, ex){
   }
   return Object.assign({}, st, { xs, n: n2, CH });
 }
+// The record shown by the platform starts at 26 Jun 2026 00:00 ICT: the first day on which rain, tilt and soil moisture / temperature of BOTH stations
+// are already converted to engineering units (before that the soil channels were raw mV, converted 25 Jun ~15:40 ST1 / ~16:05 ST2). Earlier samples stay in the stored
+// payload but are cut here, so every chart, table, analysis and the rain envelope start on the same day.
+const DATA_START = 1782406800;     // 2026-06-26 00:00 ICT
 function decodeStation(payload, meta, extra){
-  const n = payload.n;
-  const xs = new Float64Array(n);
-  xs[0] = payload.t0;
+  const n0 = payload.n;
+  const xs0 = new Float64Array(n0);
+  xs0[0] = payload.t0;
   {
     const d = payload.dtz ? inflateI32(payload.dtz) : b64ToI32(payload.dt);
-    for (let i=1;i<n;i++) xs[i] = xs[i-1] + d[i-1];
+    for (let i=1;i<n0;i++) xs0[i] = xs0[i-1] + d[i-1];
   }
+  let k0 = 0; while (k0 < n0 && xs0[k0] < DATA_START) k0++;
+  const n = n0 - k0, xs = k0 ? xs0.slice(k0) : xs0;
   const CH = {};
   for (const s of payload.series){
     let q;
-    if (s.z) { const dz = inflateI32(s.z); q = new Int32Array(n); let acc = 0; for (let i=0;i<n;i++){ acc += dz[i]; q[i] = acc; } }
+    if (s.z) { const dz = inflateI32(s.z); q = new Int32Array(n0); let acc = 0; for (let i=0;i<n0;i++){ acc += dz[i]; q[i] = acc; } }
     else q = b64ToI16(s.b64);
     const out = new Float64Array(n);
     for (let i=0;i<n;i++){
-      const v = q[i];
+      const v = q[i + k0];
       out[i] = (v === -32768) ? NaN : (v + 32767) * s.scale + s.lo;
     }
     CH[s.name] = out;
@@ -5978,7 +5984,7 @@ function buildRealtimePoints(st, fromEpoch, toEpoch, stepSec){
 }
 function makeEnvelopeChart(spec){
   const st = spec.chOwner;
-  let mode = 'rt', stepMin = 60;           // 'rt' = real-time rolling 24 h / 72 h, 'day' = one dot per calendar day
+  let mode = 'rt', stepMin = 10;           // 'rt' = real-time rolling 24 h / 72 h, 'day' = one dot per calendar day
   // stored minutes + the minutes that arrived after the page was opened (LIVE.tail)
   let days, totals, rolling3;
   const recompute = () => { const r = computeDailyTotals(LIVE.rainStation(st)); days = r.days; totals = r.totals; rolling3 = computeRolling3Day(days, totals); };
@@ -6014,23 +6020,19 @@ function makeEnvelopeChart(spec){
   const modeBtns = {};
   const mkModeBtn = (key, txt, title, fn) => { const b = document.createElement('button'); b.textContent = txt; b.title = title; b.onclick = fn; modeBtns[key] = b; modeRow.appendChild(b); return b; };
   const stepLbl = document.createElement('label'); stepLbl.textContent = 'one point every';
-  // any whole number of minutes, minimum 5, +/- 1 with the arrows (quick presets in the drop-down list)
-  const stepSel = document.createElement('input');
-  stepSel.type = 'number'; stepSel.min = '5'; stepSel.step = '1'; stepSel.style.width = '64px';
-  stepSel.title = 'minutes between two points (minimum 5, arrows change it by 1 minute)';
-  const stepList = document.createElement('datalist'); stepList.id = 'envstep-' + spec.id;
-  [5, 10, 15, 30, 60, 120, 180, 360].forEach(m => { const o = document.createElement('option'); o.value = m; stepList.appendChild(o); });
-  stepSel.setAttribute('list', stepList.id);
-  stepSel.value = String(stepMin); stepLbl.appendChild(stepSel); stepLbl.appendChild(stepList);
-  const stepUnit = document.createElement('span'); stepUnit.textContent = ' min'; stepLbl.appendChild(stepUnit);
+  // drop-down list: every whole minute from 5 to 60 (minimum 5, +1 min each), then coarser steps up to 24 h
+  const stepSel = document.createElement('select');
+  stepSel.title = 'minutes between two points (5 min minimum, every minute from 5 to 60)';
+  const STEP_OPTS = []; for (let m = 5; m <= 60; m++) STEP_OPTS.push(m); STEP_OPTS.push(75, 90, 120, 150, 180, 240, 360, 480, 720, 1440);
+  STEP_OPTS.forEach(m => { const o = document.createElement('option'); o.value = String(m); o.textContent = (m > 60 && m % 60 === 0) ? (m / 60) + ' h' : m + ' min'; stepSel.appendChild(o); });
+  stepSel.value = String(stepMin); stepLbl.appendChild(stepSel);
   mkModeBtn('rt', 'real-time (rolling 24 h / 72 h)', 'sliding window: y = last 24 h, x = last 72 h, sampled continuously', () => setMode('rt'));
   mkModeBtn('day', 'daily dots', 'one dot per calendar day (00:00-24:00 ICT)', () => setMode('day'));
   modeRow.appendChild(stepLbl);
   wrap.appendChild(modeRow);
   const syncModeUi = () => { modeBtns.rt.classList.toggle('on', mode === 'rt'); modeBtns.day.classList.toggle('on', mode === 'day'); stepLbl.style.display = mode === 'rt' ? '' : 'none'; note.textContent = mode === 'rt' ? NOTE_RT : NOTE_DAY; };
   let setMode = m => { mode = m; syncModeUi(); };    // replaced below, once build() exists
-  stepSel.onchange = () => { stepMin = Math.max(5, Math.round(Number(stepSel.value)) || 60); stepSel.value = String(stepMin); setMode('rt'); };
-  stepSel.addEventListener('keydown', e => { if (e.key === 'Enter') stepSel.onchange(); });
+  stepSel.onchange = () => { stepMin = Math.max(5, Math.round(Number(stepSel.value)) || 10); setMode('rt'); };
 
   const ctrlRow = document.createElement('div');
   ctrlRow.className = 'view-toggle envelope-controls';
@@ -6111,6 +6113,7 @@ function makeEnvelopeChart(spec){
     roll3WarnF.inp.value = thresholds.rain3day.warn;
     dailyCritF.inp.value = thresholds.rainDaily.crit;
     roll3CritF.inp.value = thresholds.rain3day.crit;
+    if (!view && entry.u){ entry.u.setData(entry.u.data, true); syncScaleBoxes(); }     // automatic scale follows the new criteria lines
   });
 
   const dotColor = st.stripe;
@@ -6146,12 +6149,22 @@ function makeEnvelopeChart(spec){
   tip.style.cssText = 'position:absolute;display:none;pointer-events:none;z-index:5;background:var(--panel,#fff);color:var(--ink,#141413);border:1px solid var(--line,#999);border-radius:6px;padding:5px 8px;font:11px "IBM Plex Mono",monospace;line-height:1.5;box-shadow:0 2px 8px rgba(0,0,0,.25);white-space:nowrap';
   holder.appendChild(tip);
   let hoverIdx = -1, curPts = { xs: [], ys: [], ts: [], nc: 0, eod: [] }, curLive = null, curLabel = null, curRt = false;
-  let xTop = 545, yTop = 365;
+  let dataMaxX = 0, dataMaxY = 0;
   const fmtDay = t => new Date((t + 7 * 3600) * 1000).toLocaleDateString('en-GB', { timeZone: 'UTC', weekday: 'short', day: '2-digit', month: 'short', year: 'numeric' });
   const levelOf = (v, w, c) => (c != null && v >= c) ? ' \u2265 critical' : (w != null && v >= w) ? ' \u2265 watch' : '';
   const entry = { wrap, u: null, section: spec.section, hasSecondary: false, isEnvelope: true };
   envTools.appendChild(makePngButton(() => entry.u && entry.u.ctx.canvas, spec.id));
 
+  // automatic scale = what is in the chart: the data (+8 %) and the AP-Model line that matters. The Level 1 (watch) line is always inside the frame;
+  // as soon as a point reaches Level 1 the frame grows to Level 2 (critical); beyond that the data decide. Follows the thresholds typed above and the date range chosen.
+  function autoExtent(){
+    const th = envelopeThresholds(), w = th[0], c = th[1];
+    const past = (l, x, y) => l.x2 > 0 && l.y1 > 0 && (x / l.x2 + y / l.y1 >= 1);
+    let bx = w.x2, by = w.y1;
+    const pts = curPts.xs.map((x, i) => [x, curPts.ys[i]]);
+    if (pts.some(([x, y]) => past(w, x, y))){ bx = c.x2; by = c.y1; }
+    return { x: Math.max(bx, dataMaxX) * 1.08 || 1, y: Math.max(by, dataMaxY) * 1.08 || 1 };
+  }
   function syncScaleBoxes(){
     const u = entry.u; if (!u) return;
     const r = v => (Math.round(v * 10) / 10);
@@ -6183,15 +6196,15 @@ function makeEnvelopeChart(spec){
     const X = xs.slice(), Y1 = ys.slice(), Y2 = xs.map(() => null);
     if (live){ X.push(live.x0, live.x); Y1.push(null, null); Y2.push(0, live.y); if (nc) Y2[nc - 1] = ys[nc - 1]; }
     const Y3 = X.map((_, i) => (i < nc && eod[i]) ? ys[i] : null);      // end-of-day moments only (big diamonds)
-    xTop = Math.max(545, ...X); yTop = Math.max(365, ...ys, live ? live.y : 0);
+    dataMaxX = 0; dataMaxY = 0; X.forEach(v => { if (v > dataMaxX) dataMaxX = v; }); ys.forEach(v => { if (v > dataMaxY) dataMaxY = v; }); if (live && live.y > dataMaxY) dataMaxY = live.y;
     if (entry.u) entry.u.destroy();
     entry.u = newUPlot({
       width: holder.clientWidth || 900,
       height: 320,
       cursor: { show: false }, // not a time series — no crosshair/nearest-point lookup needed
       scales: {
-        x: { time: false, range: () => view ? [view.x0, view.x1] : [0, xTop * 1.12] },
-        y: { time: false, range: () => view ? [view.y0, view.y1] : [0, yTop * 1.12] },
+        x: { time: false, range: () => view ? [view.x0, view.x1] : [0, autoExtent().x] },
+        y: { time: false, range: () => view ? [view.y0, view.y1] : [0, autoExtent().y] },
       },
       axes: [
         axisOpts('x', 2, { size: 40, label: rt ? 'Rainfall in the last 72 h (mm)' : '3-day cumulative rainfall (mm)' }),
