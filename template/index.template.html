@@ -5962,11 +5962,19 @@ function buildRealtimePoints(st, fromEpoch, toEpoch, stepSec){
   const lo = Math.max(fromEpoch, xs[0]), hi = Math.min(toEpoch, xs[n - 1]);
   const pts = [];
   for (let g = Math.ceil((lo + ICT) / stepSec) * stepSec - ICT; g <= hi; g += stepSec){ const p = pt(g); if (p) pts.push(p); }
+  // end-of-day moments: 24:00 ICT of every day, always present whatever the step is (flagged eod = drawn as the big marker; same value as that day's daily dot)
+  const byT = new Map(pts.map(p => [p.t, p]));
+  for (let g = Math.ceil((lo + ICT) / 86400) * 86400 - ICT; g <= hi; g += 86400){
+    const ex = byT.get(g);
+    if (ex){ ex.eod = true; continue; }
+    const p = pt(g); if (p){ p.eod = true; pts.push(p); }
+  }
+  pts.sort((p, q) => p.t - q.t);
   const tl = xs[n - 1];
   let latest = null;
   if (tl >= fromEpoch && tl <= toEpoch){ latest = pt(tl); if (latest){ latest.last = true; if (!pts.length || pts[pts.length - 1].t < tl) pts.push(latest); else latest = pts[pts.length - 1]; } }
   if (!latest && pts.length) latest = pts[pts.length - 1];
-  return { xs: pts.map(p => p.x), ys: pts.map(p => p.y), ts: pts.map(p => p.t), live: null, latestPt: latest, liveLabel: (latest && latest.t === tl) ? latest : null };
+  return { xs: pts.map(p => p.x), ys: pts.map(p => p.y), ts: pts.map(p => p.t), eod: pts.map(p => !!p.eod), live: null, latestPt: latest, liveLabel: (latest && latest.t === tl) ? latest : null };
 }
 function makeEnvelopeChart(spec){
   const st = spec.chOwner;
@@ -5998,7 +6006,7 @@ function makeEnvelopeChart(spec){
   note.textContent = 'each point is one Asia/Bangkok calendar day — x = trailing 3-day cumulative rainfall, y = that day’s total (same sums as the Rainfall chart’s daily/3-day-total tabs), connected in date order so the line traces the actual rainfall trajectory across the plane. Dashed diagonals are the AP-Model Level 1/2 boundary lines from the site’s reference figure (see the legend below for the current mm values — editable from the Sensor Readings page) — a point above/right of a line is past that level. A dot is a finished day (00:00–24:00 ICT); today is a dashed live trace that follows the logger every minute, and its newest value is the red circle.';
   wrap.appendChild(note);
   const NOTE_DAY = note.textContent;
-  const NOTE_RT = 'REAL-TIME: the plane is sampled continuously along the record, not once a day. At each moment y = rain in the last 24 hours and x = rain in the last 72 hours (both integrated from the 1-minute rain rate, the same sums as the daily dots but with a sliding window), joined oldest → newest so the line is the storm path as it happened. A moment needs at least 12 h of valid rain data in its 24 h window and 36 h in its 72 h window (an outage never draws a fake dry point). Dashed diagonals are the AP-Model Level 1/2 boundary lines — a point above/right of a line is past that level. The red circle is the newest logger sample and moves with every new minute.';
+  const NOTE_RT = 'REAL-TIME: the plane is sampled continuously along the record, not once a day. At each moment y = rain in the last 24 hours and x = rain in the last 72 hours (both integrated from the 1-minute rain rate, the same sums as the daily dots but with a sliding window), joined oldest → newest so the line is the storm path as it happened. A moment needs at least 12 h of valid rain data in its 24 h window and 36 h in its 72 h window (an outage never draws a fake dry point). Dashed diagonals are the AP-Model Level 1/2 boundary lines — a point above/right of a line is past that level. The big amber dots mark the end of each day (24:00 ICT) and carry its date, so you can see where one day closes and the next begins. The red circle is the newest logger sample and moves with every new minute.';
 
   // view mode: real-time sliding window (default) or one dot per calendar day
   const modeRow = document.createElement('div');
@@ -6006,16 +6014,23 @@ function makeEnvelopeChart(spec){
   const modeBtns = {};
   const mkModeBtn = (key, txt, title, fn) => { const b = document.createElement('button'); b.textContent = txt; b.title = title; b.onclick = fn; modeBtns[key] = b; modeRow.appendChild(b); return b; };
   const stepLbl = document.createElement('label'); stepLbl.textContent = 'one point every';
-  const stepSel = document.createElement('select');
-  [[10, '10 min'], [30, '30 min'], [60, '1 hour'], [180, '3 hours']].forEach(([m, t]) => { const o = document.createElement('option'); o.value = m; o.textContent = t; stepSel.appendChild(o); });
-  stepSel.value = String(stepMin); stepLbl.appendChild(stepSel);
+  // any whole number of minutes, minimum 5, +/- 1 with the arrows (quick presets in the drop-down list)
+  const stepSel = document.createElement('input');
+  stepSel.type = 'number'; stepSel.min = '5'; stepSel.step = '1'; stepSel.style.width = '64px';
+  stepSel.title = 'minutes between two points (minimum 5, arrows change it by 1 minute)';
+  const stepList = document.createElement('datalist'); stepList.id = 'envstep-' + spec.id;
+  [5, 10, 15, 30, 60, 120, 180, 360].forEach(m => { const o = document.createElement('option'); o.value = m; stepList.appendChild(o); });
+  stepSel.setAttribute('list', stepList.id);
+  stepSel.value = String(stepMin); stepLbl.appendChild(stepSel); stepLbl.appendChild(stepList);
+  const stepUnit = document.createElement('span'); stepUnit.textContent = ' min'; stepLbl.appendChild(stepUnit);
   mkModeBtn('rt', 'real-time (rolling 24 h / 72 h)', 'sliding window: y = last 24 h, x = last 72 h, sampled continuously', () => setMode('rt'));
   mkModeBtn('day', 'daily dots', 'one dot per calendar day (00:00-24:00 ICT)', () => setMode('day'));
   modeRow.appendChild(stepLbl);
   wrap.appendChild(modeRow);
   const syncModeUi = () => { modeBtns.rt.classList.toggle('on', mode === 'rt'); modeBtns.day.classList.toggle('on', mode === 'day'); stepLbl.style.display = mode === 'rt' ? '' : 'none'; note.textContent = mode === 'rt' ? NOTE_RT : NOTE_DAY; };
   let setMode = m => { mode = m; syncModeUi(); };    // replaced below, once build() exists
-  stepSel.onchange = () => { stepMin = Number(stepSel.value) || 60; setMode('rt'); };
+  stepSel.onchange = () => { stepMin = Math.max(5, Math.round(Number(stepSel.value)) || 60); stepSel.value = String(stepMin); setMode('rt'); };
+  stepSel.addEventListener('keydown', e => { if (e.key === 'Enter') stepSel.onchange(); });
 
   const ctrlRow = document.createElement('div');
   ctrlRow.className = 'view-toggle envelope-controls';
@@ -6099,11 +6114,13 @@ function makeEnvelopeChart(spec){
   });
 
   const dotColor = st.stripe;
+  const EOD_COLOR = '#f2b01e';           // end-of-day marker: amber fill + dark outline, clearly different from the station-coloured moments
   const legend = document.createElement('div');
   legend.className = 'legend';
   const setLegend = () => {
     legend.innerHTML = (mode === 'rt'
-      ? '<label><i style="background:' + dotColor + '"></i> one point = one moment (last 24 h vs last 72 h), joined oldest → newest</label>'
+      ? '<label><i style="background:' + dotColor + '"></i> one small point = one moment (last 24 h vs last 72 h), joined oldest → newest</label>' +
+        '<label><i style="background:' + EOD_COLOR + ';border:2px solid ' + COLOR_INK + ';border-radius:50%"></i> big amber dot with a date = end of a day (24:00 ICT), the value of that whole day</label>'
       : '<label><i style="background:' + dotColor + '"></i> one dot = one finished day (00:00–24:00 ICT), joined oldest → newest</label>' +
         '<label><i style="background:repeating-linear-gradient(90deg,' + dotColor + ' 0 4px,transparent 4px 7px)"></i> today so far (live)</label>') +
       '<label><i style="background:' + COLOR_CRIT + '"></i> latest value (red circle, updates every minute)</label>';
@@ -6128,7 +6145,7 @@ function makeEnvelopeChart(spec){
   tip.className = 'env-tip';
   tip.style.cssText = 'position:absolute;display:none;pointer-events:none;z-index:5;background:var(--panel,#fff);color:var(--ink,#141413);border:1px solid var(--line,#999);border-radius:6px;padding:5px 8px;font:11px "IBM Plex Mono",monospace;line-height:1.5;box-shadow:0 2px 8px rgba(0,0,0,.25);white-space:nowrap';
   holder.appendChild(tip);
-  let hoverIdx = -1, curPts = { xs: [], ys: [], ts: [], nc: 0 }, curLive = null, curLabel = null, curRt = false;
+  let hoverIdx = -1, curPts = { xs: [], ys: [], ts: [], nc: 0, eod: [] }, curLive = null, curLabel = null, curRt = false;
   let xTop = 545, yTop = 365;
   const fmtDay = t => new Date((t + 7 * 3600) * 1000).toLocaleDateString('en-GB', { timeZone: 'UTC', weekday: 'short', day: '2-digit', month: 'short', year: 'numeric' });
   const levelOf = (v, w, c) => (c != null && v >= c) ? ' \u2265 critical' : (w != null && v >= w) ? ' \u2265 watch' : '';
@@ -6155,14 +6172,17 @@ function makeEnvelopeChart(spec){
   function build(fromEpoch, toEpoch, keepView){
     const lastT = lastSampleOf();
     const rt = mode === 'rt';
-    const { xs, ys, ts, live, latestPt, liveLabel } = rt ? buildRealtimePoints(LIVE.rainStation(st), fromEpoch, toEpoch, stepMin * 60)
+    const built = rt ? buildRealtimePoints(LIVE.rainStation(st), fromEpoch, toEpoch, stepMin * 60)
       : buildEnvelopePoints(days, totals, rolling3, fromEpoch, toEpoch, bkkMidnight(Date.now() / 1000), lastT);
+    const { xs, ys, ts, live, latestPt, liveLabel } = built;
+    const eod = built.eod || xs.map(() => false);
     const nc = xs.length;
     curLive = live; curLabel = rt ? liveLabel : live; curRt = rt;
-    curPts = { xs: xs.concat(live ? [live.x] : []), ys: ys.concat(live ? [live.y] : []), ts: ts.concat(live ? [live.t] : []), nc };
+    curPts = { xs: xs.concat(live ? [live.x] : []), ys: ys.concat(live ? [live.y] : []), ts: ts.concat(live ? [live.t] : []), eod: eod.concat(live ? [false] : []), nc };
     hoverIdx = -1; tip.style.display = 'none'; if (!keepView) view = null;
     const X = xs.slice(), Y1 = ys.slice(), Y2 = xs.map(() => null);
     if (live){ X.push(live.x0, live.x); Y1.push(null, null); Y2.push(0, live.y); if (nc) Y2[nc - 1] = ys[nc - 1]; }
+    const Y3 = X.map((_, i) => (i < nc && eod[i]) ? ys[i] : null);      // end-of-day moments only (big diamonds)
     xTop = Math.max(545, ...X); yTop = Math.max(365, ...ys, live ? live.y : 0);
     if (entry.u) entry.u.destroy();
     entry.u = newUPlot({
@@ -6181,6 +6201,7 @@ function makeEnvelopeChart(spec){
         {},
         { label: rt ? 'moments (rolling 24 h / 72 h)' : 'finished days', stroke: dotColor, width: rt ? 1.2 : 1.5, points: { show: true, size: rt ? 3 : 5, fill: dotColor, stroke: dotColor } },
         { label: 'today so far (live)', stroke: dotColor, width: 1.5, dash: [5, 4], points: { show: false } },
+        { label: 'end of day (24:00)', stroke: EOD_COLOR, width: 0, points: { show: true, size: 12, width: 2, fill: EOD_COLOR, stroke: COLOR_INK || '#141413' }, spanGaps: false },
       ],
       legend: { show: false },
       hooks: { draw: [ drawThresholdsHook(envelopeThresholds), drawLatestPointHook(() => latestPt), () => { if (![sx0, sx1, sy0, sy1].includes(document.activeElement)) syncScaleBoxes(); }, u => {
@@ -6192,6 +6213,19 @@ function makeEnvelopeChart(spec){
         ctx.font = (10 * dpr) + 'px "IBM Plex Mono", monospace'; ctx.textBaseline = 'bottom'; ctx.fillStyle = COLOR_INK || '#141413';
         const lab = (i, dx, dy) => { const px = u.valToPos(curPts.xs[i], 'x', true), py = u.valToPos(curPts.ys[i], 'y', true); ctx.fillText(fmtShort(curPts.ts[i]).replace(/,? \d\d:\d\d$/, ''), px + dx * dpr, py + dy * dpr); };
         if (curPts.nc) lab(0, 6, -6);
+        // end-of-day dots: write the date of the day they close next to each one (only the ones in view, and only while there are not too many)
+        if (curRt){
+          const vis = [];
+          for (let i = 0; i < curPts.nc; i++){
+            if (!curPts.eod[i]) continue;
+            const px = u.valToPos(curPts.xs[i], 'x', true), py = u.valToPos(curPts.ys[i], 'y', true);
+            if (px >= u.bbox.left && px <= u.bbox.left + u.bbox.width && py >= u.bbox.top && py <= u.bbox.top + u.bbox.height) vis.push([i, px, py]);
+          }
+          if (vis.length <= 45){
+            ctx.fillStyle = COLOR_INK || '#141413';
+            vis.forEach(([i, px, py]) => ctx.fillText(new Date((curPts.ts[i] - 1 + 7 * 3600) * 1000).toLocaleDateString('en-GB', { timeZone: 'UTC', day: 'numeric', month: 'short' }), px + 8 * dpr, py - 7 * dpr));
+          }
+        }
         if (curLabel){
           const px = u.valToPos(curLabel.x, 'x', true), py = u.valToPos(curLabel.y, 'y', true);
           ctx.fillStyle = COLOR_CRIT; ctx.fillText('live ' + new Date((curLabel.t + 7 * 3600) * 1000).toISOString().slice(11, 16), px + 11 * dpr, py - 8 * dpr);
@@ -6204,7 +6238,7 @@ function makeEnvelopeChart(spec){
         }
         ctx.restore();
       } ] },
-    }, [X, Y1, Y2], holder);
+    }, [X, Y1, Y2, Y3], holder);
     // hover / tap: nearest day within 18 px tells its date and both rainfall values
     const over = entry.u.over;
     const showTip = (cx, cy) => {
@@ -6220,7 +6254,7 @@ function makeEnvelopeChart(spec){
       over.style.cursor = 'pointer';
       const dy = curPts.ys[bi], d3 = curPts.xs[bi];
       if (curRt){
-        tip.innerHTML = '<b>' + fmtDate(curPts.ts[bi]) + '</b><br>last 24 h ' + dy.toFixed(1) + ' mm' + levelOf(dy, thresholds.rainDaily.warn, thresholds.rainDaily.crit) +
+        tip.innerHTML = (curPts.eod[bi] ? '<b>END OF DAY ' + fmtDay(curPts.ts[bi] - 1) + '</b> (24:00)<br>' : '<b>' + fmtDate(curPts.ts[bi]) + '</b><br>') + 'last 24 h ' + dy.toFixed(1) + ' mm' + levelOf(dy, thresholds.rainDaily.warn, thresholds.rainDaily.crit) +
           '<br>last 72 h ' + d3.toFixed(1) + ' mm' + levelOf(d3, thresholds.rain3day.warn, thresholds.rain3day.crit) + '<br><span style="opacity:.65">moment ' + (bi + 1) + ' of ' + curPts.nc + ' in range</span>';
       } else
       tip.innerHTML = (bi >= curPts.nc ? '<b>Today so far · live</b><br><span style="opacity:.65">logger sample ' + fmtDate(curPts.ts[bi]) + '</span><br>' : '<b>' + fmtDay(curPts.ts[bi]) + '</b><br>') + 'daily ' + dy.toFixed(1) + ' mm' + levelOf(dy, thresholds.rainDaily.warn, thresholds.rainDaily.crit) +
@@ -6262,7 +6296,7 @@ function makeEnvelopeChart(spec){
     });
     over.addEventListener('dblclick', () => applyView(null));
     if (rt) caption.textContent = latestPt
-      ? (nc ? 'range ' + fmtDate(ts[0]) + ' → ' + fmtDate(ts[nc - 1]) + ' (' + nc + ' moments, one every ' + (stepMin >= 60 ? stepMin / 60 + ' h' : stepMin + ' min') + ')' : 'no moment in this range') + ' · latest moment with enough data (' + fmtDate(latestPt.t) + (latestPt.t < lastT ? ', after it the logger gave too little rain data' : ', the last logger sample') + '): last 24 h ' + latestPt.y.toFixed(1) + ' mm, last 72 h ' + latestPt.x.toFixed(1) + ' mm · point at a dot to see its time'
+      ? (nc ? 'range ' + fmtDate(ts[0]) + ' → ' + fmtDate(ts[nc - 1]) + ' (' + nc + ' moments incl. ' + eod.filter(Boolean).length + ' end-of-day dots, one every ' + (stepMin >= 60 && stepMin % 60 === 0 ? stepMin / 60 + ' h' : stepMin + ' min') + ')' : 'no moment in this range') + ' · latest moment with enough data (' + fmtDate(latestPt.t) + (latestPt.t < lastT ? ', after it the logger gave too little rain data' : ', the last logger sample') + '): last 24 h ' + latestPt.y.toFixed(1) + ' mm, last 72 h ' + latestPt.x.toFixed(1) + ' mm · point at a dot to see its time'
       : 'no data in the selected range (a moment needs 12 h of rain data in its 24 h window and 36 h in its 72 h window).';
     else caption.textContent = latestPt
       ? (nc ? 'range ' + fmtDay(ts[0]) + ' → ' + fmtDay(ts[nc - 1]) + ' (' + nc + ' finished days)' : 'no finished day in this range') + ' · latest value' + (live ? ' (today so far, last logger sample ' : ' (' ) + fmtDate(latestPt.t) + '): daily ' + latestPt.y.toFixed(1) + ' mm, 3-day cumulative ' + latestPt.x.toFixed(1) + ' mm · point at a dot to see its date'
