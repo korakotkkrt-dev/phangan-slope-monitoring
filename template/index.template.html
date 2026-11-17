@@ -6020,19 +6020,37 @@ function makeEnvelopeChart(spec){
   const modeBtns = {};
   const mkModeBtn = (key, txt, title, fn) => { const b = document.createElement('button'); b.textContent = txt; b.title = title; b.onclick = fn; modeBtns[key] = b; modeRow.appendChild(b); return b; };
   const stepLbl = document.createElement('label'); stepLbl.textContent = 'one point every';
-  // drop-down list: every whole minute from 5 to 60 (minimum 5, +1 min each), then coarser steps up to 24 h
+  // drop-down list of ready-made steps + "custom" (type any whole number of minutes)
   const stepSel = document.createElement('select');
-  stepSel.title = 'minutes between two points (5 min minimum, every minute from 5 to 60)';
-  const STEP_OPTS = []; for (let m = 5; m <= 60; m++) STEP_OPTS.push(m); STEP_OPTS.push(75, 90, 120, 150, 180, 240, 360, 480, 720, 1440);
-  STEP_OPTS.forEach(m => { const o = document.createElement('option'); o.value = String(m); o.textContent = (m > 60 && m % 60 === 0) ? (m / 60) + ' h' : m + ' min'; stepSel.appendChild(o); });
-  stepSel.value = String(stepMin); stepLbl.appendChild(stepSel);
+  stepSel.title = 'how often a point is plotted';
+  const STEP_PRESETS = [[1, '1 min'], [3, '3 min'], [5, '5 min'], [10, '10 min'], [15, '15 min'], [30, '30 min'], [60, '1 hour'], [180, '3 hours'], [360, '6 hours'], [720, '12 hours'], [1440, '1 day']];
+  STEP_PRESETS.forEach(([m, t]) => { const o = document.createElement('option'); o.value = String(m); o.textContent = t; stepSel.appendChild(o); });
+  { const o = document.createElement('option'); o.value = 'custom'; o.textContent = 'custom…'; stepSel.appendChild(o); }
+  const stepCustom = document.createElement('input');
+  stepCustom.type = 'number'; stepCustom.min = '1'; stepCustom.step = '1'; stepCustom.style.width = '70px'; stepCustom.style.display = 'none';
+  stepCustom.title = 'minutes between two points (whole number, 1 or more)';
+  const stepCustomUnit = document.createElement('span'); stepCustomUnit.textContent = ' min'; stepCustomUnit.style.display = 'none';
+  stepSel.value = String(stepMin); stepLbl.append(stepSel, stepCustom, stepCustomUnit);
   mkModeBtn('rt', 'real-time (rolling 24 h / 72 h)', 'sliding window: y = last 24 h, x = last 72 h, sampled continuously', () => setMode('rt'));
   mkModeBtn('day', 'daily dots', 'one dot per calendar day (00:00-24:00 ICT)', () => setMode('day'));
   modeRow.appendChild(stepLbl);
   wrap.appendChild(modeRow);
   const syncModeUi = () => { modeBtns.rt.classList.toggle('on', mode === 'rt'); modeBtns.day.classList.toggle('on', mode === 'day'); stepLbl.style.display = mode === 'rt' ? '' : 'none'; note.textContent = mode === 'rt' ? NOTE_RT : NOTE_DAY; };
   let setMode = m => { mode = m; syncModeUi(); };    // replaced below, once build() exists
-  stepSel.onchange = () => { stepMin = Math.max(5, Math.round(Number(stepSel.value)) || 10); setMode('rt'); };
+  const showCustom = on => { stepCustom.style.display = on ? '' : 'none'; stepCustomUnit.style.display = on ? '' : 'none'; };
+  stepSel.onchange = () => {
+    if (stepSel.value === 'custom'){ showCustom(true); stepCustom.value = String(stepMin); stepCustom.focus(); stepCustom.select(); return; }
+    showCustom(false); stepMin = Math.max(1, Math.round(Number(stepSel.value)) || 10); setMode('rt');
+  };
+  const applyCustom = () => {
+    const m = Math.round(Number(stepCustom.value));
+    if (!isFinite(m) || m < 1) return;
+    stepMin = m; stepCustom.value = String(m);
+    if (STEP_PRESETS.some(([pm]) => pm === m)){ stepSel.value = String(m); showCustom(false); }     // typed a value that is a ready-made step: show it as such
+    setMode('rt');
+  };
+  stepCustom.onchange = applyCustom;
+  stepCustom.addEventListener('keydown', e => { if (e.key === 'Enter') applyCustom(); });
 
   const ctrlRow = document.createElement('div');
   ctrlRow.className = 'view-toggle envelope-controls';
@@ -6212,7 +6230,7 @@ function makeEnvelopeChart(spec){
       ],
       series: [
         {},
-        { label: rt ? 'moments (rolling 24 h / 72 h)' : 'finished days', stroke: dotColor, width: rt ? 1.2 : 1.5, points: { show: true, size: rt ? 3 : 5, fill: dotColor, stroke: dotColor } },
+        { label: rt ? 'moments (rolling 24 h / 72 h)' : 'finished days', stroke: dotColor, width: rt ? 1.2 : 1.5, points: { show: nc <= 40000, size: rt ? 3 : 5, fill: dotColor, stroke: dotColor } },
         { label: 'today so far (live)', stroke: dotColor, width: 1.5, dash: [5, 4], points: { show: false } },
         { label: 'end of day (24:00)', stroke: EOD_COLOR, width: 0, points: { show: true, size: 12, width: 2, fill: EOD_COLOR, stroke: COLOR_INK || '#141413' }, spanGaps: false },
       ],
@@ -6258,8 +6276,11 @@ function makeEnvelopeChart(spec){
       const rect = over.getBoundingClientRect();
       const lx = cx - rect.left, ly = cy - rect.top;
       let bi = -1, bd = 18;
+      const ux = entry.u, xa = ux.posToVal(lx - 18, 'x'), xb = ux.posToVal(lx + 18, 'x'), ya = ux.posToVal(ly + 18, 'y'), yb = ux.posToVal(ly - 18, 'y');
       for (let i = 0; i < curPts.xs.length; i++){
-        const d = Math.hypot(entry.u.valToPos(curPts.xs[i], 'x') - lx, entry.u.valToPos(curPts.ys[i], 'y') - ly);
+        const px = curPts.xs[i], py = curPts.ys[i];
+        if (px < xa || px > xb || py < ya || py > yb) continue;          // cheap value-space test first (up to ~200 000 points at 1 min)
+        const d = Math.hypot(ux.valToPos(px, 'x') - lx, ux.valToPos(py, 'y') - ly);
         if (d < bd){ bd = d; bi = i; }
       }
       if (bi !== hoverIdx){ hoverIdx = bi; entry.u.redraw(false); }
@@ -6309,7 +6330,7 @@ function makeEnvelopeChart(spec){
     });
     over.addEventListener('dblclick', () => applyView(null));
     if (rt) caption.textContent = latestPt
-      ? (nc ? 'range ' + fmtDate(ts[0]) + ' → ' + fmtDate(ts[nc - 1]) + ' (' + nc + ' moments incl. ' + eod.filter(Boolean).length + ' end-of-day dots, one every ' + (stepMin >= 60 && stepMin % 60 === 0 ? stepMin / 60 + ' h' : stepMin + ' min') + ')' : 'no moment in this range') + ' · latest moment with enough data (' + fmtDate(latestPt.t) + (latestPt.t < lastT ? ', after it the logger gave too little rain data' : ', the last logger sample') + '): last 24 h ' + latestPt.y.toFixed(1) + ' mm, last 72 h ' + latestPt.x.toFixed(1) + ' mm · point at a dot to see its time'
+      ? (nc ? 'range ' + fmtDate(ts[0]) + ' → ' + fmtDate(ts[nc - 1]) + ' (' + nc + ' moments incl. ' + eod.filter(Boolean).length + ' end-of-day dots, one every ' + (stepMin >= 1440 && stepMin % 1440 === 0 ? stepMin / 1440 + ' day' : stepMin >= 60 && stepMin % 60 === 0 ? stepMin / 60 + ' h' : stepMin + ' min') + ')' : 'no moment in this range') + ' · latest moment with enough data (' + fmtDate(latestPt.t) + (latestPt.t < lastT ? ', after it the logger gave too little rain data' : ', the last logger sample') + '): last 24 h ' + latestPt.y.toFixed(1) + ' mm, last 72 h ' + latestPt.x.toFixed(1) + ' mm · point at a dot to see its time'
       : 'no data in the selected range (a moment needs 12 h of rain data in its 24 h window and 36 h in its 72 h window).';
     else caption.textContent = latestPt
       ? (nc ? 'range ' + fmtDay(ts[0]) + ' → ' + fmtDay(ts[nc - 1]) + ' (' + nc + ' finished days)' : 'no finished day in this range') + ' · latest value' + (live ? ' (today so far, last logger sample ' : ' (' ) + fmtDate(latestPt.t) + '): daily ' + latestPt.y.toFixed(1) + ' mm, 3-day cumulative ' + latestPt.x.toFixed(1) + ' mm · point at a dot to see its date'
